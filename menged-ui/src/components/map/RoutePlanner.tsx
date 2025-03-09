@@ -1,68 +1,93 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MapPin, CornerDownRight, Clock } from "lucide-react";
-import mapboxgl from "mapbox-gl";
-import "mapbox-gl/dist/mapbox-gl.css";
+import {
+  MapContainer,
+  TileLayer,
+  Marker,
+  Popup,
+  Polyline,
+  useMap,
+} from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
 
-// Use a free alternative for Mapbox. In production, use your own Mapbox token
-mapboxgl.accessToken =
-  process.env.NEXT_PUBLIC_MAPBOX_TOKEN ||
-  "pk.eyJ1IjoiZXhhbXBsZSIsImEiOiJjbDBtcXN3bjUwMWZhM2NvenhseXd2bWE3In0.example";
+// Import Leaflet default marker icons which are not included in the CSS
+import iconRetinaUrl from "leaflet/dist/images/marker-icon-2x.png";
+import iconUrl from "leaflet/dist/images/marker-icon.png";
+import shadowUrl from "leaflet/dist/images/marker-shadow.png";
 
 type LatLng = {
   lat: number;
   lng: number;
 };
 
+// Helper component to fix Leaflet icon issues
+function LeafletMapSetup() {
+  useEffect(() => {
+    // Only run this in the browser
+    if (typeof window !== "undefined") {
+      // @ts-expect-error - Leaflet typings issue
+      delete L.Icon.Default.prototype._getIconUrl;
+
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl: iconRetinaUrl.src,
+        iconUrl: iconUrl.src,
+        shadowUrl: shadowUrl.src,
+      });
+    }
+  }, []);
+
+  return null;
+}
+
+// Helper component to fit map bounds around markers
+function FitBounds({ positions }: { positions: [number, number][] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (positions.length > 0) {
+      const bounds = L.latLngBounds(positions.map((p) => [p[0], p[1]]));
+      map.fitBounds(bounds, { padding: [50, 50] });
+    }
+  }, [map, positions]);
+
+  return null;
+}
+
+type RouteInfoType = {
+  duration: number;
+  legs: Array<{
+    mode: string;
+    startTime: number;
+    endTime: number;
+    from: {
+      name: string;
+    };
+    to: {
+      name: string;
+    };
+    distance: number;
+    transitLeg: boolean;
+  }>;
+};
+
 export function RoutePlanner() {
-  const mapContainer = useRef<HTMLDivElement>(null);
-  const map = useRef<mapboxgl.Map | null>(null);
   const [fromPoint, setFromPoint] = useState<LatLng>({
     lat: 9.0208,
     lng: 38.7462,
   }); // Default to Addis Ababa
   const [toPoint, setToPoint] = useState<LatLng>({ lat: 9.0123, lng: 38.762 });
-  const [routeGeometry, setRouteGeometry] = useState<any>(null);
-  const [routeInfo, setRouteInfo] = useState<any>(null);
-
-  // Initialize map when component mounts
-  useEffect(() => {
-    if (map.current) return; // Initialize map only once
-    if (!mapContainer.current) return;
-
-    map.current = new mapboxgl.Map({
-      container: mapContainer.current,
-      style: "mapbox://styles/mapbox/streets-v12",
-      center: [fromPoint.lng, fromPoint.lat],
-      zoom: 12,
-    });
-
-    // Add navigation control
-    map.current.addControl(new mapboxgl.NavigationControl(), "top-right");
-
-    // Add from marker
-    new mapboxgl.Marker({ color: "#22c55e" })
-      .setLngLat([fromPoint.lng, fromPoint.lat])
-      .addTo(map.current);
-
-    // Add to marker
-    new mapboxgl.Marker({ color: "#ef4444" })
-      .setLngLat([toPoint.lng, toPoint.lat])
-      .addTo(map.current);
-
-    // Clean up on unmount
-    return () => {
-      if (map.current) {
-        map.current.remove();
-        map.current = null;
-      }
-    };
-  }, []);
+  const [routeInfo, setRouteInfo] = useState<RouteInfoType | null>(null);
+  const [routePositions, setRoutePositions] = useState<[number, number][]>([
+    [fromPoint.lat, fromPoint.lng],
+    [toPoint.lat, toPoint.lng],
+  ]);
 
   // Function to plan route using OTP GraphQL API
   const planRoute = async () => {
@@ -115,45 +140,10 @@ export function RoutePlanner() {
 
         // In a real app, you would get the geometry from OTP and display it
         // For now, we're just connecting the points with a line
-        if (map.current) {
-          // Remove previous route layer if exists
-          if (map.current.getLayer("route")) {
-            map.current.removeLayer("route");
-          }
-          if (map.current.getSource("route")) {
-            map.current.removeSource("route");
-          }
-
-          map.current.addSource("route", {
-            type: "geojson",
-            data: {
-              type: "Feature",
-              properties: {},
-              geometry: {
-                type: "LineString",
-                coordinates: [
-                  [fromPoint.lng, fromPoint.lat],
-                  [toPoint.lng, toPoint.lat],
-                ],
-              },
-            },
-          });
-
-          map.current.addLayer({
-            id: "route",
-            type: "line",
-            source: "route",
-            layout: {
-              "line-join": "round",
-              "line-cap": "round",
-            },
-            paint: {
-              "line-color": "#3b82f6",
-              "line-width": 6,
-              "line-opacity": 0.8,
-            },
-          });
-        }
+        setRoutePositions([
+          [fromPoint.lat, fromPoint.lng],
+          [toPoint.lat, toPoint.lng],
+        ]);
       }
     } catch (error) {
       console.error("Error planning route:", error);
@@ -216,7 +206,7 @@ export function RoutePlanner() {
                   Duration: {Math.round(routeInfo.duration / 60)} minutes
                 </p>
                 <div className="space-y-2">
-                  {routeInfo.legs.map((leg: any, index: number) => (
+                  {routeInfo.legs.map((leg, index) => (
                     <div
                       key={index}
                       className="text-sm border-l-2 border-primary pl-2"
@@ -233,10 +223,31 @@ export function RoutePlanner() {
           </div>
         </CardContent>
       </Card>
-      <div
-        ref={mapContainer}
-        className="h-full md:col-span-2 rounded-lg overflow-hidden"
-      />
+      <div className="h-full md:col-span-2 rounded-lg overflow-hidden">
+        <MapContainer
+          center={[fromPoint.lat, fromPoint.lng]}
+          zoom={13}
+          style={{ height: "100%", width: "100%" }}
+          className="z-0"
+        >
+          <LeafletMapSetup />
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          <Marker position={[fromPoint.lat, fromPoint.lng]}>
+            <Popup>Starting Point</Popup>
+          </Marker>
+          <Marker position={[toPoint.lat, toPoint.lng]}>
+            <Popup>Destination</Popup>
+          </Marker>
+          <Polyline
+            positions={routePositions}
+            pathOptions={{ color: "blue", weight: 4 }}
+          />
+          <FitBounds positions={routePositions} />
+        </MapContainer>
+      </div>
     </div>
   );
 }
