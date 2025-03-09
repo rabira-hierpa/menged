@@ -14,6 +14,16 @@ services:
       - "5432:5432"
     volumes:
       - postgis_data:/var/lib/postgresql/data
+  otp:
+    image: opentripplanner/opentripplanner:latest
+    container_name: otp-routing
+    restart: always
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./addis-ababa-gtfs-2023:/var/opentripplanner/graphs/default/gtfs
+      - ./osm:/var/opentripplanner/graphs/default/osm
+    command: "--build --save --serve"
 
 volumes:
   postgis_data:
