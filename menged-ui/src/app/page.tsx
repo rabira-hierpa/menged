@@ -67,7 +67,7 @@ export default function Home() {
         {/* Map Background with Parallax Effect */}
         <div className="absolute inset-0 z-0">
           <Image
-            src="https://images.unsplash.com/photo-1596005554384-d95de23c6053?q=80&w=2000&auto=format&fit=crop"
+            src="https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=2000&auto=format&fit=crop"
             alt="Addis Ababa Map View"
             fill
             style={{ objectFit: "cover" }}
@@ -339,7 +339,7 @@ export default function Home() {
               className="relative h-[400px] rounded-xl overflow-hidden shadow-xl"
             >
               <Image
-                src="https://images.unsplash.com/photo-1616696038562-574c4e34ebb7?q=80&w=1200&auto=format&fit=crop"
+                src="https://images.unsplash.com/photo-1566169688293-b6340ba79fd5?q=80&w=1200&auto=format&fit=crop"
                 alt="Transport data visualization"
                 fill
                 style={{ objectFit: "cover" }}
