@@ -339,7 +339,7 @@ export default function Home() {
               className="relative h-[400px] rounded-xl overflow-hidden shadow-xl"
             >
               <Image
-                src="https://images.unsplash.com/photo-1566169688293-b6340ba79fd5?q=80&w=1200&auto=format&fit=crop"
+                src="https://images.unsplash.com/photo-1596394516093-501ba68a0ba6?q=80&w=1200&auto=format&fit=crop"
                 alt="Transport data visualization"
                 fill
                 style={{ objectFit: "cover" }}
