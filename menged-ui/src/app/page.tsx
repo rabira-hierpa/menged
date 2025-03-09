@@ -339,8 +339,8 @@ export default function Home() {
               className="relative h-[400px] rounded-xl overflow-hidden shadow-xl"
             >
               <Image
-                src="https://upload.wikimedia.org/wikipedia/commons/thumb/b/b6/AddisMetro.jpg/1280px-AddisMetro.jpg"
-                alt="Addis Ababa Light Rail Transport"
+                src="https://digitaltransport4africa.org/wp-content/uploads/2024/05/Mapathon.png"
+                alt="Addis Ababa Transport Mapathon"
                 fill
                 style={{ objectFit: "cover" }}
               />
