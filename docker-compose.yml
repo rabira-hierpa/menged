@@ -17,12 +17,11 @@ services:
   otp:
     image: opentripplanner/opentripplanner:latest
     container_name: otp-routing
-    restart: always
+    restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:
-      - ./addis-ababa-gtfs-2023:/var/opentripplanner/graphs/default/gtfs
-      - ./osm:/var/opentripplanner/graphs/default/osm
+      - ./otp-data:/var/opentripplanner
     command: "--build --save --serve"
 
 volumes:
