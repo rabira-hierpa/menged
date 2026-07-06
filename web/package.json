@@ -11,6 +11,7 @@
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
     "@internationalized/date": "^3.12.2",
+    "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "@react-stately/utils": "^3.12.1",
     "@tailwindcss/typography": "^0.5.20",
@@ -42,6 +43,7 @@
     "@types/papaparse": "^5.5.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "postcss": "^8.5.16",

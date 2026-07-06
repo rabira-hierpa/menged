@@ -11,7 +11,8 @@ services:
       POSTGRES_PASSWORD: adminpassword
       POSTGRES_DB: gtfs_dev_db
     ports:
-      - "5432:5432"
+      # 5433 on the host to avoid clashing with a locally installed Postgres
+      - "5433:5432"
     volumes:
       - postgis_data:/var/lib/postgresql/data
   otp:
