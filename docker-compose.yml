@@ -32,10 +32,13 @@ services:
       # talks to it over the Docker network via OTP_URL=http://otp:8080.
       - "127.0.0.1:8081:8080"
     volumes:
-      # Contains addis-ababa.osm.pbf + et-addisababa-gtfs-2026.zip; OTP
-      # rebuilds and saves graph.obj on start.
+      # Contains et-addisababa-gtfs-2026.zip and a pre-built graph.obj
+      # (no OSM extract — OTP runs transit-only, no street-level walk legs).
       - ./otp-data:/var/opentripplanner
-    command: "--build --save --serve"
+    # Loads the pre-built graph.obj instead of rebuilding on every start.
+    # If you update the GTFS feed, temporarily switch back to
+    # "--build --save --serve" once to regenerate graph.obj, then revert.
+    command: "--load --serve"
 
   web:
     build: ./web
