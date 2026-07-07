@@ -1,20 +1,23 @@
-import { BadgeWithDot } from "@/components/base/badges/badges";
-import { Button } from "@/components/base/buttons/button";
+import { PublicMap } from "@/components/map/public-map";
+import { CONSOLE_ROLES, type AppRole } from "@/lib/permissions";
+import { getSession } from "@/lib/session";
 
-export default function Home() {
+export const dynamic = "force-dynamic";
+
+export default async function HomePage() {
+  const session = await getSession();
+  const role = (session?.user.role ?? "user") as AppRole;
+
   return (
-    <main className="flex flex-1 flex-col items-center justify-center gap-6 bg-primary">
-      <BadgeWithDot color="success" size="lg" type="pill-color">
-        Scaffold verified
-      </BadgeWithDot>
-      <h1 className="text-display-sm font-semibold text-primary">
-        Menged — Addis Ababa Transit
-      </h1>
-      <p className="max-w-md text-center text-md text-tertiary">
-        Public transport route management for Addis Ababa. The public map,
-        operations console, and settings will land here.
-      </p>
-      <Button size="lg">Untitled UI is wired up</Button>
-    </main>
+    <PublicMap
+      user={
+        session
+          ? {
+              name: session.user.name,
+              hasConsoleAccess: CONSOLE_ROLES.includes(role),
+            }
+          : null
+      }
+    />
   );
 }
