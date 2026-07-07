@@ -6,6 +6,13 @@ import { ac, roles } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
 export const auth = betterAuth({
+  baseURL: process.env.BETTER_AUTH_URL,
+  // Origin validation behind a reverse proxy (Coolify's Traefik) is more
+  // reliable when the public origin is listed explicitly rather than
+  // inferred from baseURL alone.
+  trustedOrigins: process.env.BETTER_AUTH_URL
+    ? [process.env.BETTER_AUTH_URL]
+    : undefined,
   database: prismaAdapter(prisma, {
     provider: "postgresql",
   }),
