@@ -1,6 +1,5 @@
-version: "3.8"
-
 name: menged
+
 services:
   postgis:
     image: postgis/postgis
@@ -15,6 +14,7 @@ services:
       - "5433:5432"
     volumes:
       - postgis_data:/var/lib/postgresql/data
+
   otp:
     image: opentripplanner/opentripplanner:latest
     container_name: otp-routing
@@ -22,8 +22,28 @@ services:
     ports:
       - "8080:8080"
     volumes:
+      # Contains addis-ababa.osm.pbf + et-addisababa-gtfs-2026.zip; OTP
+      # rebuilds and saves graph.obj on start.
       - ./otp-data:/var/opentripplanner
     command: "--build --save --serve"
+
+  web:
+    build: ./web
+    container_name: menged-web
+    restart: unless-stopped
+    depends_on:
+      - postgis
+      - otp
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://admin:adminpassword@postgis:5432/gtfs_dev_db
+      OTP_URL: http://otp:8080
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL}
 
 volumes:
   postgis_data:

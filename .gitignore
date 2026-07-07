@@ -72,3 +72,6 @@ temp/
 *.swp
 *~.nib
 
+
+# OTP build artifact (rebuilt from otp-data sources)
+otp-data/graph.obj
