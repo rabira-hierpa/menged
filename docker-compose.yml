@@ -10,17 +10,24 @@ services:
       POSTGRES_PASSWORD: adminpassword
       POSTGRES_DB: gtfs_dev_db
     ports:
-      # 5433 on the host to avoid clashing with a locally installed Postgres
-      - "5433:5432"
+      # Bound to localhost only — reachable from the host machine (e.g. for
+      # `prisma studio` or an SSH tunnel) but never from the public internet.
+      # 5433 avoids clashing with a locally installed Postgres.
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgis_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d gtfs_dev_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   otp:
     image: opentripplanner/opentripplanner:latest
     container_name: otp-routing
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     volumes:
       # Contains addis-ababa.osm.pbf + et-addisababa-gtfs-2026.zip; OTP
       # rebuilds and saves graph.obj on start.
@@ -32,8 +39,10 @@ services:
     container_name: menged-web
     restart: unless-stopped
     depends_on:
-      - postgis
-      - otp
+      postgis:
+        condition: service_healthy
+      otp:
+        condition: service_started
     ports:
       - "3000:3000"
     environment:
