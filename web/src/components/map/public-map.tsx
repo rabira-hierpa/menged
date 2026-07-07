@@ -9,6 +9,7 @@ import MapGl, {
   type MapLayerMouseEvent,
   type MapRef,
 } from "react-map-gl/maplibre";
+import type { FilterSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { SearchLg } from "@untitledui/icons";
 import { RouteChip } from "@/components/console/route-chip";
@@ -18,15 +19,20 @@ import { cx } from "@/utils/cx";
 import { JourneyPlanner } from "./journey-planner";
 import {
   ADDIS_CENTER,
+  applyRouteHoverTransitions,
   BASEMAP_STYLE,
+  ROUTE_HOVER_CASING_WIDTH,
+  ROUTE_HOVER_LINE_WIDTH,
   ROUTE_LINE_COLOR,
   ROUTE_LINE_WIDTH,
 } from "./map-style";
 import { decodePolyline } from "./polyline";
 import { RouteSheet } from "./route-sheet";
+import { StopMarkersLayer } from "./stop-markers-layer";
 import type {
   OtpItinerary,
   RouteDetail,
+  RouteHoverPreview,
   RouteSearchResult,
   StopSearchResult,
 } from "./types";
@@ -54,6 +60,8 @@ function legColor(mode: string) {
   return OPERATOR_META.SHEGER.color;
 }
 
+const routeHoverCache = new Map<string, RouteHoverPreview>();
+
 interface PublicMapProps {
   user: { name: string; hasConsoleAccess: boolean } | null;
 }
@@ -63,47 +71,122 @@ export function PublicMap({ user }: PublicMapProps) {
   const { selectedRouteId, setSelectedRouteId } = useMapStore();
 
   const [geojson, setGeojson] = useState<GeoJSON.FeatureCollection | null>(null);
+  const [hubStops, setHubStops] = useState<StopSearchResult[]>([]);
+  const [hoveredRouteId, setHoveredRouteId] = useState<string | null>(null);
+  const [fetchedHoverPreview, setFetchedHoverPreview] = useState<{
+    routeId: string;
+    data: RouteHoverPreview;
+  } | null>(null);
   const [tab, setTab] = useState<"explore" | "directions">("explore");
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<{
+  const [searchResults, setSearchResults] = useState<{
     routes: RouteSearchResult[];
     stops: StopSearchResult[];
   }>({ routes: [], stops: [] });
-  const [detail, setDetail] = useState<RouteDetail | null>(null);
+  const [routeDetail, setRouteDetail] = useState<{
+    routeId: string;
+    detail: RouteDetail;
+  } | null>(null);
   const [itinerary, setItinerary] = useState<OtpItinerary | null>(null);
   const [marker, setMarker] = useState<StopSearchResult | null>(null);
+
+  const effectiveHoverId =
+    hoveredRouteId && hoveredRouteId !== selectedRouteId ? hoveredRouteId : null;
+  const hoverPreview =
+    effectiveHoverId == null
+      ? null
+      : (routeHoverCache.get(effectiveHoverId) ??
+        (fetchedHoverPreview?.routeId === effectiveHoverId
+          ? fetchedHoverPreview.data
+          : null));
+  const results =
+    query.trim().length < 2 ? { routes: [], stops: [] } : searchResults;
+  const detail =
+    selectedRouteId && routeDetail?.routeId === selectedRouteId
+      ? routeDetail.detail
+      : null;
 
   useEffect(() => {
     fetch("/api/geo/routes")
       .then((res) => res.json())
       .then(setGeojson);
+    fetch("/api/geo/hub-stops")
+      .then((res) => res.json())
+      .then((data: GeoJSON.FeatureCollection) => {
+        setHubStops(
+          data.features.map((feature) => ({
+            id: feature.properties?.stopId as string,
+            name: feature.properties?.name as string,
+            lat: (feature.geometry as GeoJSON.Point).coordinates[1],
+            lon: (feature.geometry as GeoJSON.Point).coordinates[0],
+          })),
+        );
+      });
   }, []);
+
+  // Fetch stop list + full geometry for the hovered route.
+  useEffect(() => {
+    if (!effectiveHoverId) return;
+    if (routeHoverCache.has(effectiveHoverId)) return;
+
+    const controller = new AbortController();
+    let cancelled = false;
+
+    const handle = setTimeout(() => {
+      const request = fetch(`/api/routes/${effectiveHoverId}/hover`, {
+        signal: controller.signal,
+      });
+      // Attach immediately so abort during cleanup cannot become an unhandled rejection.
+      request.catch(() => {});
+
+      void request
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: RouteHoverPreview | null) => {
+          if (cancelled || !data) return;
+          routeHoverCache.set(effectiveHoverId, data);
+          setFetchedHoverPreview({ routeId: effectiveHoverId, data });
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return;
+          if (error instanceof DOMException && error.name === "AbortError") return;
+        });
+    }, 60);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+      controller.abort();
+    };
+  }, [effectiveHoverId]);
+
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (!map || !hoveredRouteId) return;
+
+    const apply = () => applyRouteHoverTransitions(map);
+    if (map.isStyleLoaded()) apply();
+    else map.once("idle", apply);
+  }, [hoveredRouteId, hoverPreview]);
 
   // Search-as-you-type.
   useEffect(() => {
-    if (query.trim().length < 2) {
-      setResults({ routes: [], stops: [] });
-      return;
-    }
+    if (query.trim().length < 2) return;
     const handle = setTimeout(async () => {
       const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-      setResults(await res.json());
+      setSearchResults(await res.json());
     }, 250);
     return () => clearTimeout(handle);
   }, [query]);
 
   // Load route detail when a route is selected.
   useEffect(() => {
-    if (!selectedRouteId) {
-      setDetail(null);
-      return;
-    }
+    if (!selectedRouteId) return;
     let cancelled = false;
     fetch(`/api/routes/${selectedRouteId}`)
       .then((res) => res.json())
       .then((data: RouteDetail) => {
         if (cancelled) return;
-        setDetail(data);
+        setRouteDetail({ routeId: selectedRouteId, detail: data });
         if (data.geojson?.coordinates?.length) {
           mapRef.current?.fitBounds(
             boundsOf(data.geojson.coordinates as [number, number][]),
@@ -119,6 +202,7 @@ export function PublicMap({ user }: PublicMapProps) {
   const selectRoute = (routeId: string) => {
     setItinerary(null);
     setMarker(null);
+    setHoveredRouteId(null);
     setSelectedRouteId(routeId);
   };
 
@@ -156,6 +240,42 @@ export function PublicMap({ user }: PublicMapProps) {
     const feature = event.features?.[0];
     if (feature) selectRoute(feature.properties.routeId as string);
   };
+
+  const previewRoute = useCallback((routeId: string | null) => {
+    setHoveredRouteId(routeId);
+  }, []);
+
+  const onMapMouseMove = useCallback(
+    (event: MapLayerMouseEvent) => {
+      if (selectedRouteId || itinerary) return;
+      const feature = event.features?.find((f) => f.layer.id === "routes-all");
+      const routeId = feature?.properties?.routeId as string | undefined;
+      const canvas = mapRef.current?.getCanvas();
+      if (canvas) canvas.style.cursor = routeId ? "pointer" : "";
+      if (routeId && routeId !== hoveredRouteId) previewRoute(routeId);
+      else if (!routeId && hoveredRouteId) previewRoute(null);
+    },
+    [hoveredRouteId, itinerary, previewRoute, selectedRouteId],
+  );
+
+  const onMapMouseLeave = useCallback(() => {
+    const canvas = mapRef.current?.getCanvas();
+    if (canvas) canvas.style.cursor = "";
+    if (!selectedRouteId) previewRoute(null);
+  }, [previewRoute, selectedRouteId]);
+
+  const hoverFilter: FilterSpecification = hoveredRouteId
+    ? ["==", ["get", "routeId"], hoveredRouteId]
+    : ["==", ["get", "routeId"], ""];
+
+  const showHubStops =
+    tab === "explore" && !selectedRouteId && !itinerary && !hoveredRouteId;
+  const showHoverStops = Boolean(
+    hoveredRouteId && hoverPreview?.stops.length && !selectedRouteId,
+  );
+  const showSelectedStops = Boolean(
+    selectedRouteId && detail?.stops.length && !itinerary,
+  );
 
   const detailGeojson = useMemo(
     () =>
@@ -199,6 +319,8 @@ export function PublicMap({ user }: PublicMapProps) {
         canvasContextAttributes={{ preserveDrawingBuffer: true }}
         interactiveLayerIds={["routes-all"]}
         onClick={onMapClick}
+        onMouseMove={onMapMouseMove}
+        onMouseLeave={onMapMouseLeave}
         style={{ width: "100%", height: "100%" }}
       >
         {geojson && (
@@ -210,11 +332,45 @@ export function PublicMap({ user }: PublicMapProps) {
               paint={{
                 "line-color": ROUTE_LINE_COLOR,
                 "line-width": ROUTE_LINE_WIDTH,
-                "line-opacity": detail || itinerary ? 0.18 : 0.65,
+                "line-opacity":
+                  hoveredRouteId || detail || itinerary ? 0.22 : 0.65,
               }}
             />
+            {hoveredRouteId ? (
+              <Layer
+                id="routes-hover-casing"
+                type="line"
+                filter={hoverFilter}
+                layout={{ "line-cap": "round", "line-join": "round" }}
+                paint={{
+                  "line-color": "#FFFFFF",
+                  "line-width": ROUTE_HOVER_CASING_WIDTH,
+                  "line-opacity": 0.95,
+                }}
+              />
+            ) : null}
+            {hoveredRouteId ? (
+              <Layer
+                id="routes-hover-line"
+                type="line"
+                filter={hoverFilter}
+                layout={{ "line-cap": "round", "line-join": "round" }}
+                paint={{
+                  "line-color": ROUTE_LINE_COLOR,
+                  "line-width": ROUTE_HOVER_LINE_WIDTH,
+                  "line-opacity": 1,
+                }}
+              />
+            ) : null}
           </Source>
         )}
+
+        <StopMarkersLayer
+          id="hub-stops"
+          stops={hubStops}
+          variant="hub"
+          visible={showHubStops}
+        />
 
         {detailGeojson && (
           <Source id="selected-route" type="geojson" data={detailGeojson}>
@@ -241,6 +397,22 @@ export function PublicMap({ user }: PublicMapProps) {
             />
           </Source>
         )}
+
+        {/* Stop markers render after route lines so they sit on top. */}
+        <StopMarkersLayer
+          id="hover-stops"
+          stops={hoverPreview?.stops ?? []}
+          variant="route"
+          visible={showHoverStops}
+          onLine
+        />
+        <StopMarkersLayer
+          id="selected-stops"
+          stops={detail?.stops ?? []}
+          variant="route"
+          visible={showSelectedStops}
+          onLine
+        />
 
         {itineraryGeojson && (
           <Source id="itinerary" type="geojson" data={itineraryGeojson}>
@@ -353,6 +525,8 @@ export function PublicMap({ user }: PublicMapProps) {
                       <button
                         key={route.id}
                         onClick={() => selectRoute(route.id)}
+                        onMouseEnter={() => previewRoute(route.id)}
+                        onMouseLeave={() => previewRoute(null)}
                         className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-[#F4F5F2]"
                       >
                         <RouteChip
@@ -392,19 +566,27 @@ export function PublicMap({ user }: PublicMapProps) {
                 )}
 
                 {query.trim().length < 2 && (
-                  <div className="flex flex-wrap gap-3 pt-1">
-                    {Object.values(OPERATOR_META).map((meta) => (
-                      <span
-                        key={meta.code}
-                        className="flex items-center gap-1.5 text-[11.5px] font-medium text-[#5C6B5E]"
-                      >
+                  <div className="flex flex-col gap-2 pt-1">
+                    <div className="flex flex-wrap gap-3">
+                      {Object.values(OPERATOR_META).map((meta) => (
                         <span
-                          className="h-1 w-4 rounded-sm"
-                          style={{ background: meta.color }}
-                        />
-                        {meta.short}
-                      </span>
-                    ))}
+                          key={meta.code}
+                          className="flex items-center gap-1.5 text-[11.5px] font-medium text-[#5C6B5E]"
+                        >
+                          <span
+                            className="h-1 w-4 rounded-sm"
+                            style={{ background: meta.color }}
+                          />
+                          {meta.short}
+                        </span>
+                      ))}
+                    </div>
+                    {hubStops.length > 0 && (
+                      <p className="text-[11px] leading-snug text-[#7E9182]">
+                        Green dots mark major destinations — hover any route
+                        line to preview its stops.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

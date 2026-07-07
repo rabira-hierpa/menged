@@ -14,6 +14,17 @@ export interface StopSearchResult {
   lon: number;
 }
 
+export interface RouteHoverPreview {
+  id: string;
+  shortName: string;
+  longName: string;
+  routeType: number;
+  geojson: GeoJSON.LineString | null;
+  operatorCode: string | null;
+  closed: boolean;
+  stops: StopSearchResult[];
+}
+
 export interface RouteDetail {
   id: string;
   shortName: string;
