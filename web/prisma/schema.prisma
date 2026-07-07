@@ -79,3 +79,192 @@ model Verification {
   @@index([identifier])
   @@map("verification")
 }
+
+// ---------------------------------------------------------------------------
+// Transit domain — GTFS entities (ids are GTFS ids) + management tables
+// ---------------------------------------------------------------------------
+
+enum OperatorCode {
+  ANBESSA
+  SHEGER
+  ALLIANCE
+  MINIBUS
+  LRT
+}
+
+enum FareKind {
+  FLAT
+  TIERED
+}
+
+enum ClosureReason {
+  PUBLIC_HOLIDAY
+  MAINTENANCE
+  POLITICAL_EVENT
+  OTHER
+}
+
+model Agency {
+  id       String  @id
+  name     String
+  url      String?
+  timezone String?
+  routes   Route[]
+
+  @@map("agency")
+}
+
+model Operator {
+  id          String            @id @default(cuid())
+  code        OperatorCode      @unique
+  name        String
+  kind        String // "Fixed-route bus" | "Light rail transit" | "Demand-responsive paratransit"
+  assignments RouteAssignment[]
+
+  @@map("operator")
+}
+
+model Route {
+  id                String   @id
+  shortName         String
+  longName          String
+  type              Int // GTFS route_type: 0 = LRT, 3 = bus
+  color             String?
+  textColor         String?
+  agencyId          String
+  agency            Agency   @relation(fields: [agencyId], references: [id])
+  // Precomputed LineString geometry: full resolution for detail views,
+  // simplified for the all-routes network layer.
+  geojson           Json?
+  geojsonSimplified Json?
+  lengthMeters      Float?
+
+  trips      Trip[]
+  fare       Fare?
+  closures   RouteClosure[]
+  assignment RouteAssignment?
+
+  @@index([shortName])
+  @@map("route")
+}
+
+model Stop {
+  id        String     @id
+  name      String
+  lat       Float
+  lon       Float
+  stopTimes StopTime[]
+
+  @@index([name])
+  @@map("stop")
+}
+
+model Trip {
+  id          String      @id
+  routeId     String
+  route       Route       @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  serviceId   String
+  shapeId     String?
+  headsign    String?
+  stopTimes   StopTime[]
+  frequencies Frequency[]
+
+  @@index([routeId])
+  @@map("trip")
+}
+
+model StopTime {
+  tripId    String
+  trip      Trip   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  stopId    String
+  stop      Stop   @relation(fields: [stopId], references: [id], onDelete: Cascade)
+  sequence  Int
+  arrival   String?
+  departure String?
+
+  @@id([tripId, sequence])
+  @@index([stopId])
+  @@map("stop_time")
+}
+
+model Frequency {
+  id          String @id @default(cuid())
+  tripId      String
+  trip        Trip   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  startTime   String
+  endTime     String
+  headwaySecs Int
+
+  @@index([tripId])
+  @@map("frequency")
+}
+
+model Calendar {
+  serviceId String  @id
+  monday    Boolean
+  tuesday   Boolean
+  wednesday Boolean
+  thursday  Boolean
+  friday    Boolean
+  saturday  Boolean
+  sunday    Boolean
+  startDate String
+  endDate   String
+
+  @@map("calendar")
+}
+
+model Fare {
+  id            String     @id @default(cuid())
+  routeId       String     @unique
+  route         Route      @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  kind          FareKind
+  flatAmountEtb Decimal?   @db.Decimal(8, 2)
+  currency      String     @default("ETB")
+  tiers         FareTier[]
+  updatedAt     DateTime   @updatedAt
+
+  @@map("fare")
+}
+
+model FareTier {
+  id        String  @id @default(cuid())
+  fareId    String
+  fare      Fare    @relation(fields: [fareId], references: [id], onDelete: Cascade)
+  label     String // e.g. "0–4 km", "Short hop"
+  fromKm    Float
+  toKm      Float? // null = open-ended ("8+ km")
+  amountEtb Decimal @db.Decimal(8, 2)
+
+  @@index([fareId])
+  @@map("fare_tier")
+}
+
+model RouteClosure {
+  id          String        @id @default(cuid())
+  routeId     String
+  route       Route         @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  reason      ClosureReason
+  note        String?
+  startsAt    DateTime
+  endsAt      DateTime
+  createdById String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([routeId, startsAt, endsAt])
+  @@map("route_closure")
+}
+
+model RouteAssignment {
+  id           String   @id @default(cuid())
+  routeId      String   @unique
+  route        Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  operatorId   String
+  operator     Operator @relation(fields: [operatorId], references: [id])
+  assignedById String? // null when assigned by the seed pipeline
+  assignedAt   DateTime @default(now())
+
+  @@index([operatorId])
+  @@map("route_assignment")
+}
