@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "design-preview",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4173", "--directory", "/private/tmp/claude-501/-Users-rz-rz-codes-menged/d12f490b-19a1-42f4-9f66-596b8f584737/scratchpad/design"],
+      "port": 4173
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "web"],
+      "port": 3000
+    }
+  ]
+}

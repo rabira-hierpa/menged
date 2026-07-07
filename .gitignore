@@ -72,3 +72,10 @@ temp/
 *.swp
 *~.nib
 
+
+# OTP build artifact (rebuilt from otp-data sources)
+otp-data/graph.obj
+
+# Large data files (exceed GitHub's 100MB limit)
+otp-data/
+osm/
