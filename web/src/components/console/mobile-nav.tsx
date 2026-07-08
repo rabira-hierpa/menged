@@ -7,6 +7,7 @@ import {
   BankNote02,
   DotsVertical,
   Grid01,
+  LineChartUp01,
   Map01,
   Route as RouteIcon,
 } from "@untitledui/icons";
@@ -18,6 +19,7 @@ export const MOBILE_TABS = [
   { href: "/console/routes", label: "Routes", icon: RouteIcon },
   { href: "/console/network", label: "Network", icon: Map01 },
   { href: "/console/fares", label: "Fares", icon: BankNote02 },
+  { href: "/console/analytics", label: "Analytics", icon: LineChartUp01 },
 ];
 
 interface ConsoleMobileNavProps {
