@@ -426,8 +426,8 @@ export function PublicMap({ user }: PublicMapProps) {
       {/* Header: brand + tabs */}
       <div className="flex items-center gap-2">
         <div className="min-w-0">
-          <div className="font-mono text-md font-semibold tracking-widest text-[#15803D]">
-            MENGED
+          <div className="text-md font-semibold tracking-widest text-[#15803D]">
+            Menged
           </div>
         </div>
         <div className="ml-auto flex shrink-0 rounded-full bg-[#F1F3F4] p-0.5">
