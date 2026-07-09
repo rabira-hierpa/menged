@@ -22,7 +22,7 @@ export function LayersPanel() {
         className="fixed inset-0 z-40 bg-black/25 sm:bg-transparent"
         onClick={() => setLayersOpen(false)}
       />
-      <div className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-4px_24px_rgba(0,0,0,0.2)] sm:absolute sm:inset-auto sm:top-16 sm:right-4 sm:bottom-auto sm:w-72 sm:rounded-2xl sm:shadow-xl sm:ring-1 sm:ring-black/5">
+      <div className="fixed inset-x-0 bottom-0 z-50 rounded-t-2xl bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-4px_24px_rgba(0,0,0,0.2)] sm:absolute sm:inset-auto sm:bottom-18 sm:left-4 sm:w-72 sm:rounded-2xl sm:shadow-xl sm:ring-1 sm:ring-black/5">
         <div className="mb-3 flex items-center justify-between">
           <div>
             <div className="text-[15px] font-semibold text-[#202124]">

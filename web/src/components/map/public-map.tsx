@@ -65,22 +65,56 @@ function boundsOf(coordinates: [number, number][]) {
   ] as [[number, number], [number, number]];
 }
 
-/** Padding that keeps geometry clear of the sheet (mobile) or panel (desktop). */
-function fitPadding() {
+/**
+ * Padding that keeps geometry clear of the sheet (mobile) or panel
+ * (desktop). `withSidePanel` accounts for the detail panel that opens
+ * beside the main panel when a route/stop is selected.
+ */
+function fitPadding(withSidePanel = false) {
   const mobile =
     typeof window !== "undefined" &&
     window.matchMedia("(max-width: 639px)").matches;
-  return mobile
-    ? {
-        top: 90,
-        bottom: Math.round(window.innerHeight * 0.5),
-        left: 40,
-        right: 40,
-      }
-    : { top: 80, bottom: 80, left: 440, right: 80 };
+  if (mobile) {
+    return {
+      top: 90,
+      bottom: Math.round(window.innerHeight * 0.5),
+      left: 40,
+      right: 40,
+    };
+  }
+  return { top: 80, bottom: 80, left: withSidePanel ? 840 : 440, right: 80 };
 }
 
 const routeHoverCache = new Map<string, RouteHoverPreview>();
+
+/** Stop details card shared by the mobile sheet and the desktop side panel. */
+function StopCard({
+  stop,
+  onDirections,
+}: {
+  stop: StopSearchResult;
+  onDirections: (stop: StopSearchResult) => void;
+}) {
+  return (
+    <div className="rounded-2xl bg-[#F8F9FA] p-3.5">
+      <div className="flex items-center gap-2.5">
+        <span className="size-3 shrink-0 rounded-full border-[3px] border-[#1A73E8] bg-white" />
+        <div className="min-w-0 flex-1 text-[14px] font-semibold text-[#202124]">
+          {stop.name}
+        </div>
+      </div>
+      <div className="mt-1 pl-5.5 text-[11.5px] text-[#5F6368]">
+        {stop.lat.toFixed(5)}, {stop.lon.toFixed(5)}
+      </div>
+      <button
+        onClick={() => onDirections(stop)}
+        className="mt-3 w-full cursor-pointer rounded-full bg-[#1A73E8] py-2 text-[13px] font-semibold text-white hover:bg-[#1765CC]"
+      >
+        Directions to here
+      </button>
+    </div>
+  );
+}
 
 interface PublicMapProps {
   user: { name: string; hasConsoleAccess: boolean } | null;
@@ -230,7 +264,8 @@ export function PublicMap({ user }: PublicMapProps) {
         if (data.geojson?.coordinates?.length) {
           mapRef.current?.fitBounds(
             boundsOf(data.geojson.coordinates as [number, number][]),
-            { padding: fitPadding(), duration: 800 },
+            // Selecting a route opens the detail side panel on desktop.
+            { padding: fitPadding(true), duration: 800 },
           );
         }
       });
@@ -274,6 +309,12 @@ export function PublicMap({ user }: PublicMapProps) {
     });
   };
 
+  /** Back navigation from a route/stop detail to the results (or map). */
+  const clearSelection = () => {
+    setSelectedRouteId(null);
+    setSelectedStop(null);
+  };
+
   const onMapClick = (event: MapLayerMouseEvent) => {
     if (hasDirections) return;
     const feature = event.features?.find(
@@ -292,15 +333,34 @@ export function PublicMap({ user }: PublicMapProps) {
   const onMapMouseMove = useCallback(
     (event: MapLayerMouseEvent) => {
       if (selectedRouteId || hasDirections) return;
-      const feature = event.features?.find((f) => f.layer.id === "routes-all");
+      // Only hover routes whose operator layer is toggled on — hidden lines
+      // are invisible (opacity 0) but still hit-testable in MapLibre.
+      const feature = event.features?.find(
+        (f) =>
+          f.layer.id === "routes-all" &&
+          !hiddenOperators.includes(
+            f.properties?.operatorCode as (typeof hiddenOperators)[number],
+          ),
+      );
       const routeId = feature?.properties?.routeId as string | undefined;
       const canvas = mapRef.current?.getCanvas();
       if (canvas) canvas.style.cursor = routeId ? "pointer" : "";
       if (routeId && routeId !== hoveredRouteId) previewRoute(routeId);
       else if (!routeId && hoveredRouteId) previewRoute(null);
     },
-    [hoveredRouteId, hasDirections, previewRoute, selectedRouteId],
+    [hoveredRouteId, hasDirections, hiddenOperators, previewRoute, selectedRouteId],
   );
+
+  // Drop an active hover if its layer gets toggled off mid-hover.
+  useEffect(() => {
+    if (!hoveredRouteId) return;
+    const operatorCode = geojson?.features.find(
+      (f) => f.properties?.routeId === hoveredRouteId,
+    )?.properties?.operatorCode as (typeof hiddenOperators)[number] | undefined;
+    if (operatorCode && hiddenOperators.includes(operatorCode)) {
+      setHoveredRouteId(null);
+    }
+  }, [hiddenOperators, hoveredRouteId, geojson]);
 
   const onMapMouseLeave = useCallback(() => {
     const canvas = mapRef.current?.getCanvas();
@@ -464,8 +524,15 @@ export function PublicMap({ user }: PublicMapProps) {
             />
           </div>
 
-          {hasSearchResults && !detail && !selectedStop && (
-            <div className="flex flex-col gap-0.5">
+          {/* Results stay visible beside the detail panel on desktop
+              (Google-Maps style); on mobile the detail takes over the sheet. */}
+          {hasSearchResults && (
+            <div
+              className={cx(
+                "flex flex-col gap-0.5",
+                (detail || selectedStop) && "max-sm:hidden",
+              )}
+            >
               {results.routes.length > 0 && (
                 <div className="mt-1 text-[10.5px] font-semibold tracking-wide text-[#5F6368] uppercase">
                   Routes
@@ -477,7 +544,12 @@ export function PublicMap({ user }: PublicMapProps) {
                   onClick={() => selectRoute(route.id)}
                   onMouseEnter={() => previewRoute(route.id)}
                   onMouseLeave={() => previewRoute(null)}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-[#F8F9FA]"
+                  className={cx(
+                    "flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 text-left",
+                    route.id === selectedRouteId
+                      ? "bg-[#E8F0FE]"
+                      : "hover:bg-[#F8F9FA]",
+                  )}
                 >
                   <RouteChip
                     shortName={route.shortName}
@@ -498,7 +570,12 @@ export function PublicMap({ user }: PublicMapProps) {
                 <button
                   key={stop.id}
                   onClick={() => selectStop(stop)}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-[#F8F9FA]"
+                  className={cx(
+                    "flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 text-left",
+                    stop.id === selectedStop?.id
+                      ? "bg-[#E8F0FE]"
+                      : "hover:bg-[#F8F9FA]",
+                  )}
                 >
                   <span className="size-2.5 shrink-0 rounded-full border-[3px] border-[#1A73E8] bg-white" />
                   <span className="min-w-0 truncate text-[13px] text-[#202124]">
@@ -515,29 +592,21 @@ export function PublicMap({ user }: PublicMapProps) {
             </div>
           )}
 
-          {/* Selected stop card */}
-          {selectedStop && !detail && (
-            <div className="rounded-2xl bg-[#F8F9FA] p-3.5">
-              <div className="flex items-center gap-2.5">
-                <span className="size-3 shrink-0 rounded-full border-[3px] border-[#1A73E8] bg-white" />
-                <div className="min-w-0 flex-1 text-[14px] font-semibold text-[#202124]">
-                  {selectedStop.name}
-                </div>
-              </div>
+          {/* Mobile: detail replaces the sheet content, with back nav.
+              Desktop shows details in the separate side panel instead. */}
+          {(selectedStop || detail) && (
+            <div className="flex flex-col gap-2 sm:hidden">
               <button
-                onClick={() => openDirectionsTo(selectedStop)}
-                className="mt-3 w-full cursor-pointer rounded-full bg-[#1A73E8] py-2 text-[13px] font-semibold text-white hover:bg-[#1765CC]"
+                onClick={clearSelection}
+                className="flex cursor-pointer items-center gap-1.5 self-start rounded-full px-2 py-1 text-[13px] font-semibold text-[#1A73E8] hover:bg-[#F1F3F4]"
               >
-                Directions to here
+                ← {hasSearchResults ? "Back to results" : "Back to map"}
               </button>
+              {selectedStop && !detail && (
+                <StopCard stop={selectedStop} onDirections={openDirectionsTo} />
+              )}
+              {detail && <RouteSheet detail={detail} onClose={clearSelection} />}
             </div>
-          )}
-
-          {detail && (
-            <RouteSheet
-              detail={detail}
-              onClose={() => setSelectedRouteId(null)}
-            />
           )}
 
           {query.trim().length < 2 && !selectedStop && !detail && (
@@ -845,6 +914,30 @@ export function PublicMap({ user }: PublicMapProps) {
           </Link>
         )}
       </div>
+
+      {/* Desktop: detail side panel beside the main panel (Google-Maps
+          style) — the results list stays visible in the main panel. */}
+      {tab === "explore" && (detail || selectedStop) && (
+        <div className="absolute top-4 left-[26rem] z-30 hidden max-h-[calc(100dvh-6rem)] w-96 flex-col overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-black/5 sm:flex">
+          <div className="flex items-center gap-1 border-b border-[#EEF1EA] px-3 py-2">
+            <button
+              onClick={clearSelection}
+              aria-label="Back"
+              className="flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-1 text-[13px] font-semibold text-[#1A73E8] hover:bg-[#F1F3F4]"
+            >
+              ← {hasSearchResults ? "Back to results" : "Close"}
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            {selectedStop && !detail && (
+              <StopCard stop={selectedStop} onDirections={openDirectionsTo} />
+            )}
+            {detail && (
+              <RouteSheet detail={detail} onClose={clearSelection} />
+            )}
+          </div>
+        </div>
+      )}
 
       <FloatingControls onLocate={onLocate} />
       <LayersPanel />

@@ -108,7 +108,8 @@ export function BottomSheet({ children }: { children: React.ReactNode }) {
       </motion.div>
 
       {/* Desktop: floating left panel */}
-      <div className="absolute top-4 left-4 z-30 hidden max-h-[calc(100dvh-2rem)] w-96 flex-col overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-black/5 sm:flex">
+      {/* Bottom clearance keeps the layers button visible below the panel. */}
+      <div className="absolute top-4 left-4 z-30 hidden max-h-[calc(100dvh-6rem)] w-96 flex-col overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-black/5 sm:flex">
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {children}
         </div>
