@@ -82,5 +82,5 @@ export async function GET() {
   });
 
   const stamp = new Date().toISOString().slice(0, 10);
-  return csvResponse(`menged-closures-${stamp}.csv`, toCsv(header, rows));
+  return csvResponse(`dandii-closures-${stamp}.csv`, toCsv(header, rows));
 }

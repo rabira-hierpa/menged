@@ -14,7 +14,7 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Menged — Addis Ababa Transit",
+  title: "Dandii — Addis Ababa Transit",
   description:
     "Public transport route management and journey planning for Addis Ababa",
 };

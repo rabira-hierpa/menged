@@ -497,7 +497,7 @@ export function PublicMap({ user }: PublicMapProps) {
       <div className="flex items-center gap-2">
         <div className="min-w-0">
           <div className="text-md font-semibold tracking-widest text-[#15803D]">
-            Menged
+            Dandii
           </div>
         </div>
         <div className="ml-auto flex shrink-0 rounded-full bg-[#F1F3F4] p-0.5">

@@ -58,7 +58,7 @@ export default async function AnalyticsReportPage() {
       {/* Report header */}
       <header className="mb-6 border-b-2 border-[#152018] pb-4">
         <div className="font-mono text-[11px] font-semibold tracking-widest text-[#15803D]">
-          MENGED · ADDIS ABABA TRANSIT
+          DANDII · ADDIS ABABA TRANSIT
         </div>
         <h1 className="mt-1 text-[26px] font-bold text-[#1C2321]">
           Network Performance Report
@@ -182,7 +182,7 @@ export default async function AnalyticsReportPage() {
         and assumed vehicle sizes (LRT 286 · bus 60 · minibus 12 passengers);
         no ridership feed is connected. Fare averages reflect configured fare
         structures, not collected revenue. Data: DT4A GTFS 2026 feed and
-        Menged operations records.
+        Dandii operations records.
       </footer>
     </div>
   );

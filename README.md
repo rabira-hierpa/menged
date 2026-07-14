@@ -1,6 +1,6 @@
-# Menged — Addis Ababa Public Transport Route Management
+# Dandii — Addis Ababa Public Transport Route Management
 
-Menged is a role-based public transport route management system for Addis
+Dandii is a role-based public transport route management system for Addis
 Ababa, built on the DT4A **GTFS 2026** feed (447 routes: Anbessa, Sheger,
 Alliance, Minibus associations, and Addis LRT). It ships a public
 Google-Maps-style transit map with journey planning, and a network
@@ -34,7 +34,7 @@ operations console for transport officials.
 ## Project structure
 
 ```
-menged/
+dandii/
 ├── data/gtfs-2026/        # DT4A feed: combined + bus/minibus sub-feed zips
 ├── otp-data/              # OSM extract + GTFS zip; OTP builds graph.obj here
 ├── web/                   # Next.js app

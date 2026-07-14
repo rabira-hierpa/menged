@@ -89,5 +89,5 @@ export async function GET() {
   }
 
   const stamp = new Date().toISOString().slice(0, 10);
-  return csvResponse(`menged-fares-${stamp}.csv`, toCsv(header, rows));
+  return csvResponse(`dandii-fares-${stamp}.csv`, toCsv(header, rows));
 }

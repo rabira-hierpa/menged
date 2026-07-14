@@ -49,7 +49,7 @@ export function SignInCard() {
     <div className="flex w-full max-w-100 flex-col items-center gap-8 rounded-2xl bg-primary px-8 py-10 shadow-lg ring-1 ring-secondary">
       <div className="flex flex-col items-center gap-2 text-center">
         <span className="font-mono text-sm font-medium tracking-wide text-brand-secondary">
-          MENGED
+          DANDII
         </span>
         <h1 className="text-display-xs font-semibold text-primary">
           Addis Ababa Transit

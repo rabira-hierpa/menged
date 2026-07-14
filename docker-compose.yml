@@ -1,9 +1,9 @@
-name: menged
+name: dandii
 
 services:
   postgis:
     image: postgis/postgis
-    container_name: menged-dev-db
+    container_name: dandii-dev-db
     restart: always
     environment:
       POSTGRES_USER: admin
@@ -46,7 +46,7 @@ services:
 
   web:
     build: ./web
-    container_name: menged-web
+    container_name: dandii-web
     restart: unless-stopped
     depends_on:
       postgis:

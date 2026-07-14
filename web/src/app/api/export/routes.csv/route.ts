@@ -132,7 +132,7 @@ export async function GET(request: Request) {
 
   const stamp = new Date().toISOString().slice(0, 10);
   return csvResponse(
-    `menged-routes-${stamp}.csv`,
+    `dandii-routes-${stamp}.csv`,
     toCsv(header, rows),
   );
 }
