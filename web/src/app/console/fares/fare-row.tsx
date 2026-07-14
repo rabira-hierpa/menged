@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Controller, useFieldArray, useForm } from "react-hook-form";
+import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { Plus, Trash01 } from "@untitledui/icons";
 import { fareSchema, type FareInput } from "@/actions/fare-schema";
 import { updateFare } from "@/actions/fares";
@@ -62,7 +62,7 @@ export function FareRow({
             tiers: data.tiers.length > 0 ? data.tiers : DEFAULT_TIERS,
           },
   });
-  const kind = form.watch("kind");
+  const kind = useWatch({ control: form.control, name: "kind" });
   const { fields, append, remove } = useFieldArray({
     control: form.control,
     // Cast: "tiers" only exists on the TIERED branch of the union.
@@ -111,6 +111,7 @@ export function FareRow({
   return (
     <form
       onSubmit={onSubmit}
+      noValidate
       className="flex flex-wrap items-center gap-5 rounded-xl border border-[#E2E6DE] bg-white px-5 py-4"
     >
       <div className="flex min-w-60 flex-1 items-center gap-3">
@@ -211,6 +212,48 @@ export function FareRow({
                     <Trash01 className="size-3.5" />
                   </button>
                 )}
+              </div>
+              {/* Distance band, editable end-to-end */}
+              <div className="flex items-center gap-1 text-[11px] text-[#5C6B5E]">
+                <Controller
+                  control={form.control}
+                  name={`tiers.${index}.fromKm`}
+                  render={({ field }) => (
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.5}
+                      value={field.value ?? 0}
+                      onChange={(e) => field.onChange(Number(e.target.value))}
+                      disabled={readOnly}
+                      className="w-13 rounded border border-[#E2E6DE] bg-white px-1.5 py-0.5 text-[11px] tabular-nums"
+                      aria-label={`Tier ${index + 1} from km`}
+                    />
+                  )}
+                />
+                <span>–</span>
+                <Controller
+                  control={form.control}
+                  name={`tiers.${index}.toKm`}
+                  render={({ field }) => (
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.5}
+                      value={field.value ?? ""}
+                      placeholder="∞"
+                      onChange={(e) =>
+                        field.onChange(
+                          e.target.value === "" ? null : Number(e.target.value),
+                        )
+                      }
+                      disabled={readOnly}
+                      className="w-13 rounded border border-[#E2E6DE] bg-white px-1.5 py-0.5 text-[11px] tabular-nums"
+                      aria-label={`Tier ${index + 1} to km`}
+                    />
+                  )}
+                />
+                <span>km</span>
               </div>
             </div>
           ))}

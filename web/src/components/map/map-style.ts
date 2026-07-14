@@ -1,4 +1,4 @@
-import type { ExpressionSpecification } from "maplibre-gl";
+import type { ExpressionSpecification, Map as MapLibreMap } from "maplibre-gl";
 import { CLOSED_ROUTE_COLOR, OPERATOR_META } from "@/lib/operators";
 
 /** Free, key-less basemap. */
@@ -39,3 +39,40 @@ export const ROUTE_LINE_WIDTH: ExpressionSpecification = [
   14,
   ["case", ["==", ["get", "routeType"], 0], 5, 3],
 ];
+
+/** Hover highlight — 3× the base network line width (separate interpolate; zoom cannot nest). */
+export const ROUTE_HOVER_LINE_WIDTH: ExpressionSpecification = [
+  "interpolate",
+  ["linear"],
+  ["zoom"],
+  10,
+  ["case", ["==", ["get", "routeType"], 0], 7.5, 3.6],
+  14,
+  ["case", ["==", ["get", "routeType"], 0], 15, 9],
+];
+
+/** White casing around the 3× hover line (+4px halo; separate interpolate). */
+export const ROUTE_HOVER_CASING_WIDTH: ExpressionSpecification = [
+  "interpolate",
+  ["linear"],
+  ["zoom"],
+  10,
+  ["case", ["==", ["get", "routeType"], 0], 11.5, 7.6],
+  14,
+  ["case", ["==", ["get", "routeType"], 0], 19, 13],
+];
+
+/** Apply smooth width transitions to hover route layers. */
+export function applyRouteHoverTransitions(map: MapLibreMap) {
+  for (const layerId of ["routes-hover-casing", "routes-hover-line"]) {
+    if (!map.getLayer(layerId)) continue;
+    map.setPaintProperty(layerId, "line-width-transition", {
+      duration: 280,
+      delay: 0,
+    });
+    map.setPaintProperty(layerId, "line-opacity-transition", {
+      duration: 220,
+      delay: 0,
+    });
+  }
+}

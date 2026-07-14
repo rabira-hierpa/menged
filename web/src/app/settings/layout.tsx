@@ -16,7 +16,7 @@ export default async function SettingsLayout({
         <div className="mx-auto flex max-w-260 items-center gap-4 px-6 py-4">
           <Link href="/console" className="group">
             <div className="font-mono text-[11px] font-semibold tracking-widest text-[#15803D]">
-              MENGED
+              DANDII
             </div>
             <div className="text-[15px] leading-tight font-bold text-[#1C2321] group-hover:text-[#15803D]">
               Settings

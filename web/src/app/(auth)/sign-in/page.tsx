@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { SignInCard } from "./sign-in-card";
 
 export const metadata = {
-  title: "Sign in — Menged",
+  title: "Sign in — Dandii",
 };
 
 export default function SignInPage() {
