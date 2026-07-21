@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BankNote02,
+  CheckDone01,
   DotsVertical,
   Grid01,
   LineChartUp01,
@@ -19,6 +20,7 @@ export const MOBILE_TABS = [
   { href: "/console/routes", label: "Routes", icon: RouteIcon },
   { href: "/console/network", label: "Network", icon: Map01 },
   { href: "/console/fares", label: "Fares", icon: BankNote02 },
+  { href: "/console/proposals", label: "Review", icon: CheckDone01 },
   { href: "/console/analytics", label: "Analytics", icon: LineChartUp01 },
 ];
 

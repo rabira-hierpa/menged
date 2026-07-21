@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: "/console/routes", label: "Route Assignment", dot: "#15803D" },
   { href: "/console/network", label: "Network Map", dot: "#0F766E" },
   { href: "/console/fares", label: "Fare Management", dot: "#1D4ED8" },
+  { href: "/console/proposals", label: "Fare Review", dot: "#DC2626" },
   { href: "/console/analytics", label: "Analytics", dot: "#9333EA" },
 ];
 
