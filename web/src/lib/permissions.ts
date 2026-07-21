@@ -12,6 +12,11 @@ export const statement = {
   // Maintainers may only create closures with reason MAINTENANCE/OTHER —
   // that narrowing is enforced in the closure server actions.
   closure: ["read", "create", "update", "delete"],
+  // Reviewing (approve/reject) a rider fare proposal. This is the ONLY way a
+  // maintainer influences fares — they cannot edit fares directly (that needs
+  // fare:update, route-operator+). Approval writes fares via the permission-
+  // free applyFareChange helper.
+  proposal: ["review"],
   system: ["settings"],
 } as const;
 
@@ -22,6 +27,7 @@ export const superAdminRole = ac.newRole({
   route: ["read", "assign", "create", "update", "delete"],
   fare: ["read", "create", "update", "delete"],
   closure: ["read", "create", "update", "delete"],
+  proposal: ["review"],
   system: ["settings"],
 });
 
@@ -32,6 +38,7 @@ export const adminRole = ac.newRole({
   route: ["read", "assign", "create", "update", "delete"],
   fare: ["read", "create", "update", "delete"],
   closure: ["read", "create", "update", "delete"],
+  proposal: ["review"],
   system: ["settings"],
 });
 
@@ -40,12 +47,14 @@ export const routeOperatorRole = ac.newRole({
   route: ["read", "assign", "create", "update"],
   fare: ["read", "create", "update", "delete"],
   closure: ["read", "create", "update", "delete"],
+  proposal: ["review"],
 });
 
 export const maintainerRole = ac.newRole({
   route: ["read"],
   fare: ["read"],
   closure: ["read", "create", "update", "delete"],
+  proposal: ["review"],
 });
 
 /** Regular signed-in citizens: no console access. */
