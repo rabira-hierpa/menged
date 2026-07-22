@@ -63,8 +63,10 @@ Example: `feat: library rail for saved and recent searches`
 ## Data and licensing notes
 
 - The vendored DT4A GTFS feed under `data/gtfs-2026/` remains subject to its
-  upstream terms; this repo’s [MIT LICENSE](./LICENSE) covers Dandii application
-  code and docs we author.
+  upstream terms. Dandii application code is under the
+  [PolyForm Noncommercial License](./LICENSE): keep the Required Notice /
+  credit Rabira Hierpa · Dandii, and do **not** use the work commercially
+  without a separate written license from the copyright holder.
 - Prefer preserving approved fare data when reseeding (`npm run db:seed`
   defaults to preserve-fares). Do not wipe production-like data casually.
 

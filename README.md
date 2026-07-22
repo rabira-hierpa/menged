@@ -117,7 +117,7 @@ zips), re-run `npm run db:seed`, and replace the zip in `otp-data/`
 
 - [CONTRIBUTING.md](./CONTRIBUTING.md) — local setup, PR expectations, commit style
 - [SECURITY.md](./SECURITY.md) — private vulnerability reporting
-- [LICENSE](./LICENSE) — MIT (application code; GTFS feed retains upstream terms)
+- [LICENSE](./LICENSE) — PolyForm Noncommercial 1.0.0 (credit required; **no commercial use**; GTFS feed retains upstream terms)
 
 ## Acknowledgements
 
