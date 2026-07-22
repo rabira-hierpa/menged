@@ -12,18 +12,14 @@
  * overlay must not add errors the base feed did not already have.
  */
 import { readFileSync } from "node:fs";
+import {
+  errorCountsFromReport,
+  findRegressions,
+} from "./validate-feed-diff-lib.mjs";
 
-/** Map of ERROR-severity notice code -> count, from a validator report.json. */
 function errorCounts(reportPath) {
   const report = JSON.parse(readFileSync(reportPath, "utf8"));
-  const counts = new Map();
-  for (const notice of report.notices ?? []) {
-    const severity = String(notice.severity ?? "").toUpperCase();
-    if (severity !== "ERROR") continue;
-    const total = notice.totalNotices ?? notice.sampleNotices?.length ?? 0;
-    counts.set(notice.code, total);
-  }
-  return counts;
+  return errorCountsFromReport(report);
 }
 
 const [, , baselinePath, candidatePath] = process.argv;
@@ -36,12 +32,7 @@ if (!baselinePath || !candidatePath) {
 
 const baseline = errorCounts(baselinePath);
 const candidate = errorCounts(candidatePath);
-
-const regressions = [];
-for (const [code, count] of candidate) {
-  const base = baseline.get(code) ?? 0;
-  if (count > base) regressions.push({ code, base, count });
-}
+const regressions = findRegressions(baseline, candidate);
 
 if (regressions.length > 0) {
   console.error("✗ GTFS validator gate FAILED — new or increased errors:");
