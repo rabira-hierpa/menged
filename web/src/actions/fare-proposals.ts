@@ -18,16 +18,31 @@ type Result<T = unknown> =
   | ({ ok: true } & T)
   | { ok: false; error: string };
 
-/** Rebuild the applyFareChange payload from a proposal's proposed-* columns. */
-function proposedFareData(proposal: {
+/**
+ * Rebuild + re-validate the applyFareChange payload from a proposal's
+ * proposed-* columns (same ceilings as submit).
+ */
+function validatedProposedFareData(proposal: {
+  routeId: string;
   proposedKind: "FLAT" | "TIERED";
   proposedFlatEtb: Prisma.Decimal | null;
   proposedTiers: Prisma.JsonValue;
 }): FareData {
   if (proposal.proposedKind === "FLAT") {
-    return { kind: "FLAT", flatAmountEtb: proposal.proposedFlatEtb!.toNumber() };
+    const flatAmountEtb = proposal.proposedFlatEtb?.toNumber() ?? 0;
+    submitProposalSchema.parse({
+      routeId: proposal.routeId,
+      kind: "FLAT",
+      flatAmountEtb,
+    });
+    return { kind: "FLAT", flatAmountEtb };
   }
   const tiers = (proposal.proposedTiers as unknown as ProposalTier[]) ?? [];
+  submitProposalSchema.parse({
+    routeId: proposal.routeId,
+    kind: "TIERED",
+    tiers,
+  });
   return { kind: "TIERED", tiers };
 }
 
@@ -132,7 +147,12 @@ export async function reviewProposal(
   }
 
   const superseded = await prisma.$transaction(async (tx) => {
-    // Claim the decision; 0 rows means another maintainer got here first.
+    // Serialize approvals per route so two concurrent PENDING proposals cannot
+    // both land as APPROVED (advisory lock released at end of this tx).
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${proposal.routeId}))`;
+
+    // Claim the decision; 0 rows means another maintainer got here first
+    // (or a sibling approval already superseded this row).
     const claimed = await tx.fareProposal.updateMany({
       where: { id: proposalId, status: "PENDING" },
       data: {
@@ -148,7 +168,11 @@ export async function reviewProposal(
 
     if (decision === "reject") return 0;
 
-    await applyFareChange(tx, proposal.routeId, proposedFareData(proposal), {
+    // Re-validate amounts at approval so corrupt/tampered proposed* columns
+    // never reach applyFareChange or the GTFS export (see proposal-schema.ts).
+    const fareData = validatedProposedFareData(proposal);
+
+    await applyFareChange(tx, proposal.routeId, fareData, {
       source: "PROPOSAL_APPROVAL",
       changedById: session.user.id,
       proposalId: proposal.id,

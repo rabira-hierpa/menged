@@ -2,6 +2,7 @@ import { ZipArchive } from "archiver";
 import { createWriteStream } from "node:fs";
 import { mkdir, readdir, readFile, stat, unlink } from "node:fs/promises";
 import path from "node:path";
+import { Prisma } from "@/generated/prisma/client";
 import {
   fareAttributesCsv,
   fareRulesCsv,
@@ -134,23 +135,15 @@ export interface GeneratedVersion {
  * Generate the next feed version: build the zip, write a FeedVersion row
  * (validatorStatus PENDING — the validator gate runs in CI only), and prune
  * old zip files. Synchronous end to end (file copies + two small files).
+ *
+ * Version allocation retries on P2002 so concurrent generate calls cannot
+ * collide on FeedVersion.version @unique.
  */
 export async function generateFeedVersion(
   generatedById: string,
 ): Promise<GeneratedVersion> {
-  // Fail loudly if the base feed isn't reachable rather than shipping an
-  // empty/partial zip.
   const baseDir = await resolveBaseDir();
 
-  const last = await prisma.feedVersion.findFirst({
-    orderBy: { version: "desc" },
-    select: { version: true, lastChangeLogId: true },
-  });
-  const version = (last?.version ?? 0) + 1;
-  const label = `v${version}`;
-
-  // Read every fare and let selectFlatFares apply the V1 omission rule (4A) —
-  // one tested place decides what reaches the export.
   const fareRows = await prisma.fare.findMany({
     select: { routeId: true, kind: true, flatAmountEtb: true },
   });
@@ -161,56 +154,85 @@ export async function generateFeedVersion(
       flatAmountEtb: f.flatAmountEtb?.toNumber() ?? null,
     })),
   );
-  // Drop fares for routes absent from the base feed (console-created `manual-…`
-  // routes) — referencing them would be a GTFS foreign_key_violation.
   const baseRouteIds = await readBaseRouteIds(baseDir);
   const fares: FlatFare[] = allFlat.filter((f) => baseRouteIds.has(f.routeId));
 
   await mkdir(EXPORT_DIR, { recursive: true });
-  const filePath = path.join(EXPORT_DIR, `dandii-gtfs-${label}.zip`);
-  await buildZip(filePath, baseDir, version, fares);
-  const { size } = await stat(filePath);
 
-  // Change report cursor: count FareChangeLog rows since the previous version's
-  // anchor, and record the newest row's id as this version's anchor.
   const newestLog = await prisma.fareChangeLog.findFirst({
     orderBy: { createdAt: "desc" },
     select: { id: true, createdAt: true },
   });
-  let fareChangeCount: number;
-  if (last?.lastChangeLogId) {
-    const cursor = await prisma.fareChangeLog.findUnique({
-      where: { id: last.lastChangeLogId },
-      select: { createdAt: true },
-    });
-    fareChangeCount = cursor
-      ? await prisma.fareChangeLog.count({
-          where: { createdAt: { gt: cursor.createdAt } },
-        })
-      : await prisma.fareChangeLog.count();
-  } else {
-    fareChangeCount = await prisma.fareChangeLog.count();
-  }
 
-  await prisma.feedVersion.create({
-    data: {
+  let lastAttemptError: unknown;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const last = await prisma.feedVersion.findFirst({
+      orderBy: { version: "desc" },
+      select: { version: true, lastChangeLogId: true },
+    });
+    const version = (last?.version ?? 0) + 1;
+    const label = `v${version}`;
+    const filePath = path.join(EXPORT_DIR, `dandii-gtfs-${label}.zip`);
+
+    let fareChangeCount: number;
+    if (last?.lastChangeLogId) {
+      const cursor = await prisma.fareChangeLog.findUnique({
+        where: { id: last.lastChangeLogId },
+        select: { createdAt: true },
+      });
+      fareChangeCount = cursor
+        ? await prisma.fareChangeLog.count({
+            where: { createdAt: { gt: cursor.createdAt } },
+          })
+        : await prisma.fareChangeLog.count();
+    } else {
+      fareChangeCount = await prisma.fareChangeLog.count();
+    }
+
+    await buildZip(filePath, baseDir, version, fares);
+    const { size } = await stat(filePath);
+
+    try {
+      await prisma.feedVersion.create({
+        data: {
+          version,
+          label,
+          filePath,
+          sizeBytes: size,
+          fareChangeCount,
+          generatedById,
+          lastChangeLogId: newestLog?.id ?? last?.lastChangeLogId ?? null,
+        },
+      });
+    } catch (e) {
+      lastAttemptError = e;
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === "P2002"
+      ) {
+        // Another generate won the version slot — retry with a fresh max.
+        try {
+          await unlink(filePath);
+        } catch {
+          // zip may already be gone
+        }
+        continue;
+      }
+      throw e;
+    }
+
+    await pruneOldZips();
+
+    return {
       version,
       label,
-      filePath,
       sizeBytes: size,
       fareChangeCount,
-      generatedById,
-      lastChangeLogId: newestLog?.id ?? last?.lastChangeLogId ?? null,
-    },
-  });
+      routeCount: fares.length,
+    };
+  }
 
-  await pruneOldZips();
-
-  return {
-    version,
-    label,
-    sizeBytes: size,
-    fareChangeCount,
-    routeCount: fares.length,
-  };
+  throw lastAttemptError instanceof Error
+    ? lastAttemptError
+    : new Error("Could not allocate a unique feed version after retries");
 }
