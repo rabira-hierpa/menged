@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/base/buttons/button";
+import { DandiiLogo } from "@/components/foundations/logo/dandii-logo";
 import { authClient } from "@/lib/auth-client";
 
 const GoogleIcon = () => (
@@ -48,9 +49,7 @@ export function SignInCard() {
   return (
     <div className="flex w-full max-w-100 flex-col items-center gap-8 rounded-2xl bg-primary px-8 py-10 shadow-lg ring-1 ring-secondary">
       <div className="flex flex-col items-center gap-2 text-center">
-        <span className="font-mono text-sm font-medium tracking-wide text-brand-secondary">
-          DANDII
-        </span>
+        <DandiiLogo />
         <h1 className="text-display-xs font-semibold text-primary">
           Addis Ababa Transit
         </h1>

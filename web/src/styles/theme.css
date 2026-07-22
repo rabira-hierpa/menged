@@ -1,7 +1,8 @@
 @theme {
     /* FONT FAMILY */
     --font-body: var(--font-inter, "Inter"), -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-    --font-display: var(--font-inter, "Inter"), -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    /* Brand / display face — Poppins (same free face as rz-codes.com). */
+    --font-display: var(--font-poppins, "Poppins"), -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
     --font-mono: var(--font-plex-mono, "IBM Plex Mono"), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 
     /* FONT SIZE */
