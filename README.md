@@ -113,6 +113,12 @@ Drop the new feed into `data/gtfs-2026/` (combined extracted + sub-feed
 zips), re-run `npm run db:seed`, and replace the zip in `otp-data/`
 (the filename must contain `gtfs`) so OTP rebuilds its graph on restart.
 
+## Contributing & security
+
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — local setup, PR expectations, commit style
+- [SECURITY.md](./SECURITY.md) — private vulnerability reporting
+- [LICENSE](./LICENSE) — MIT (application code; GTFS feed retains upstream terms)
+
 ## Acknowledgements
 
 - [Digital Transport for Africa](https://digitaltransport4africa.org/) for the Addis Ababa GTFS feed
