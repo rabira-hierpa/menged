@@ -1,7 +1,14 @@
 import { ZipArchive } from "archiver";
 import { createWriteStream } from "node:fs";
-import { mkdir, readdir, stat, unlink } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, unlink } from "node:fs/promises";
 import path from "node:path";
+import {
+  fareAttributesCsv,
+  fareRulesCsv,
+  feedInfoCsv,
+  selectFlatFares,
+  type FlatFare,
+} from "@/lib/gtfs-fares-format";
 import { prisma } from "@/lib/prisma";
 
 /**
@@ -53,35 +60,6 @@ const REPLACED = new Set([
   "fare_rules.txt",
 ]);
 
-interface FlatFare {
-  routeId: string;
-  price: number;
-}
-
-function fareAttributesCsv(fares: FlatFare[]): string {
-  const lines = ["fare_id,price,currency_type,payment_method,transfers"];
-  for (const f of fares) {
-    // payment_method=0 (paid on board); transfers empty = unlimited.
-    lines.push(`f_${f.routeId},${f.price.toFixed(2)},ETB,0,`);
-  }
-  return lines.join("\n") + "\n";
-}
-
-function fareRulesCsv(fares: FlatFare[]): string {
-  const lines = ["fare_id,route_id"];
-  for (const f of fares) lines.push(`f_${f.routeId},${f.routeId}`);
-  return lines.join("\n") + "\n";
-}
-
-function feedInfoCsv(version: number): string {
-  return (
-    [
-      "feed_publisher_name,feed_publisher_url,feed_lang,feed_start_date,feed_end_date,feed_version,feed_contact_email,feed_contact_url",
-      `Dandii (Addis Ababa Transit),https://digitaltransport4africa.org/,en,20191201,20991231,dandii-v${version},info@addismap.com,https://addismaptransit.com/support/`,
-    ].join("\n") + "\n"
-  );
-}
-
 /** Copy the base feed + overlay the three generated files into `filePath`. */
 async function buildZip(
   filePath: string,
@@ -112,6 +90,26 @@ async function buildZip(
 
   await archive.finalize();
   await done;
+}
+
+/**
+ * route_ids present in the base feed's routes.txt. A fare_rules row for a
+ * route not in routes.txt is a GTFS foreign_key_violation, so console-created
+ * routes (id `manual-…`) that never made it into the vendored feed must be
+ * excluded from the overlay. route_id is the first column and its values carry
+ * no commas, so splitting on "," is safe even for quoted long-name fields.
+ */
+async function readBaseRouteIds(baseDir: string): Promise<Set<string>> {
+  const content = await readFile(path.join(baseDir, "routes.txt"), "utf8");
+  const lines = content.split(/\r?\n/).filter((l) => l.length > 0);
+  const idx = lines[0].split(",").indexOf("route_id");
+  if (idx === -1) throw new Error("base routes.txt has no route_id column");
+  const ids = new Set<string>();
+  for (let i = 1; i < lines.length; i++) {
+    const id = lines[i].split(",")[idx];
+    if (id) ids.add(id);
+  }
+  return ids;
 }
 
 /** Prune zip FILES beyond the newest KEEP_ZIPS (DB rows are kept for audit). */
@@ -151,16 +149,22 @@ export async function generateFeedVersion(
   const version = (last?.version ?? 0) + 1;
   const label = `v${version}`;
 
-  // Only FLAT fares reach the V1 export (tiered omitted, 4A).
+  // Read every fare and let selectFlatFares apply the V1 omission rule (4A) —
+  // one tested place decides what reaches the export.
   const fareRows = await prisma.fare.findMany({
-    where: { kind: "FLAT", flatAmountEtb: { not: null } },
-    select: { routeId: true, flatAmountEtb: true },
-    orderBy: { routeId: "asc" },
+    select: { routeId: true, kind: true, flatAmountEtb: true },
   });
-  const fares: FlatFare[] = fareRows.map((f) => ({
-    routeId: f.routeId,
-    price: f.flatAmountEtb!.toNumber(),
-  }));
+  const allFlat = selectFlatFares(
+    fareRows.map((f) => ({
+      routeId: f.routeId,
+      kind: f.kind,
+      flatAmountEtb: f.flatAmountEtb?.toNumber() ?? null,
+    })),
+  );
+  // Drop fares for routes absent from the base feed (console-created `manual-…`
+  // routes) — referencing them would be a GTFS foreign_key_violation.
+  const baseRouteIds = await readBaseRouteIds(baseDir);
+  const fares: FlatFare[] = allFlat.filter((f) => baseRouteIds.has(f.routeId));
 
   await mkdir(EXPORT_DIR, { recursive: true });
   const filePath = path.join(EXPORT_DIR, `dandii-gtfs-${label}.zip`);
