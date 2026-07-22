@@ -119,33 +119,66 @@ async function main() {
     }
   }
 
-  console.log("Truncating transit tables…");
-  await prisma.routeClosure.deleteMany();
+  // --preserve-fares is the DEFAULT (design-review T0). It never deletes
+  // routes — `route.deleteMany()` cascades Fare/FareTier/FareProposal/
+  // FareChangeLog away (Fare.route is onDelete: Cascade), so a routine reseed
+  // during development would silently destroy approved fare corrections.
+  // Preserve mode upserts routes, rebuilds only the transit-graph children
+  // (which hold no user data), and skips default-fare seeding whenever any
+  // Fare row already exists. Pass --destructive for a full wipe + reseed.
+  const preserve = !process.argv.includes("--destructive");
+  const seedFares = !preserve || (await prisma.fare.count()) === 0;
+  console.log(
+    preserve
+      ? `Preserve mode: keeping fares/proposals/closures${seedFares ? " (none yet — will seed defaults)" : " (skipping default-fare seed)"}`
+      : "Destructive mode: full wipe + reseed",
+  );
+
+  // Agencies and operators are upserted (never deleted): routes FK the agency,
+  // so in preserve mode we cannot truncate it while routes still exist.
+  for (const a of agencies) {
+    await prisma.agency.upsert({
+      where: { id: a.agency_id },
+      create: {
+        id: a.agency_id,
+        name: a.agency_name,
+        url: a.agency_url || null,
+        timezone: a.agency_timezone || null,
+      },
+      update: {
+        name: a.agency_name,
+        url: a.agency_url || null,
+        timezone: a.agency_timezone || null,
+      },
+    });
+  }
+  for (const op of OPERATORS) {
+    await prisma.operator.upsert({
+      where: { code: op.code },
+      create: op,
+      update: { name: op.name, kind: op.kind },
+    });
+  }
+  const operatorIdByCode = new Map(
+    (await prisma.operator.findMany()).map((o) => [o.code, o.id]),
+  );
+
+  // Transit-graph children hold no user data — always rebuilt. Deleting trips
+  // cascades their stop_times and frequencies; deleting a route (destructive
+  // only) cascades its fares/proposals/closures/assignment.
+  console.log("Rebuilding transit-graph tables…");
   await prisma.routeAssignment.deleteMany();
-  await prisma.fareTier.deleteMany();
-  await prisma.fare.deleteMany();
   await prisma.frequency.deleteMany();
   await prisma.stopTime.deleteMany();
   await prisma.trip.deleteMany();
   await prisma.calendar.deleteMany();
-  await prisma.route.deleteMany();
   await prisma.stop.deleteMany();
-  await prisma.operator.deleteMany();
-  await prisma.agency.deleteMany();
-
-  console.log("Importing agencies and operators…");
-  await prisma.agency.createMany({
-    data: agencies.map((a) => ({
-      id: a.agency_id,
-      name: a.agency_name,
-      url: a.agency_url || null,
-      timezone: a.agency_timezone || null,
-    })),
-  });
-  await prisma.operator.createMany({ data: OPERATORS });
-  const operatorIdByCode = new Map(
-    (await prisma.operator.findMany()).map((o) => [o.code, o.id]),
-  );
+  if (!preserve) {
+    await prisma.routeClosure.deleteMany();
+    await prisma.fareTier.deleteMany();
+    await prisma.fare.deleteMany();
+    await prisma.route.deleteMany();
+  }
 
   console.log("Importing stops…");
   await batchedCreate(stops, (chunk) =>
@@ -162,34 +195,36 @@ async function main() {
 
   console.log("Importing routes…");
   const routeOperator = new Map<string, OperatorCode>();
-  await batchedCreate(routes, (chunk) =>
-    prisma.route.createMany({
-      data: chunk.map((r) => {
-        const code = classifyOperator(r, minibusIds);
-        routeOperator.set(r.route_id, code);
-        const shapeId = routeShapeId.get(r.route_id);
-        const coords = shapeId ? shapes.get(shapeId) : undefined;
-        const geometry = coords ? buildRouteGeometry(coords) : null;
-        return {
-          id: r.route_id,
-          shortName: r.route_short_name,
-          longName: r.route_long_name,
-          type: Number(r.route_type),
-          color: r.route_color || null,
-          textColor: r.route_text_color || null,
-          agencyId: r.agency_id,
-          geojson: geometry
-            ? (geometry.geojson as unknown as Prisma.InputJsonValue)
-            : undefined,
-          geojsonSimplified: geometry
-            ? (geometry.geojsonSimplified as unknown as Prisma.InputJsonValue)
-            : undefined,
-          lengthMeters: geometry?.lengthMeters ?? null,
-        };
-      }),
-      skipDuplicates: true,
-    }),
-  );
+  // Upsert (not createMany): preserves existing routes and their fares while
+  // inserting new ones and updating changed metadata. Never deletes a route,
+  // so a reseed can't cascade approved fares away. ~450 upserts, ~2s.
+  for (const r of routes) {
+    const code = classifyOperator(r, minibusIds);
+    routeOperator.set(r.route_id, code);
+    const shapeId = routeShapeId.get(r.route_id);
+    const coords = shapeId ? shapes.get(shapeId) : undefined;
+    const geometry = coords ? buildRouteGeometry(coords) : null;
+    const fields = {
+      shortName: r.route_short_name,
+      longName: r.route_long_name,
+      type: Number(r.route_type),
+      color: r.route_color || null,
+      textColor: r.route_text_color || null,
+      agencyId: r.agency_id,
+      geojson: geometry
+        ? (geometry.geojson as unknown as Prisma.InputJsonValue)
+        : undefined,
+      geojsonSimplified: geometry
+        ? (geometry.geojsonSimplified as unknown as Prisma.InputJsonValue)
+        : undefined,
+      lengthMeters: geometry?.lengthMeters ?? null,
+    };
+    await prisma.route.upsert({
+      where: { id: r.route_id },
+      create: { id: r.route_id, ...fields },
+      update: fields,
+    });
+  }
 
   console.log("Importing calendar, trips, stop times, frequencies…");
   await prisma.calendar.createMany({
@@ -252,7 +287,7 @@ async function main() {
     }),
   );
 
-  console.log("Assigning operators and default fares…");
+  console.log("Assigning operators…");
   await batchedCreate([...routeOperator.entries()], (chunk) =>
     prisma.routeAssignment.createMany({
       data: chunk.map(([routeId, code]) => ({
@@ -261,25 +296,31 @@ async function main() {
       })),
     }),
   );
-  for (const [routeId, code] of routeOperator) {
-    const fare = defaultFare(code);
-    await prisma.fare.create({
-      data: {
-        routeId,
-        kind: fare.kind,
-        flatAmountEtb: fare.flat,
-        tiers: fare.tiers
-          ? {
-              create: fare.tiers.map((t) => ({
-                label: t.label,
-                fromKm: t.fromKm,
-                toKm: t.toKm,
-                amountEtb: t.amount,
-              })),
-            }
-          : undefined,
-      },
-    });
+
+  if (seedFares) {
+    console.log("Seeding default fares…");
+    for (const [routeId, code] of routeOperator) {
+      const fare = defaultFare(code);
+      await prisma.fare.create({
+        data: {
+          routeId,
+          kind: fare.kind,
+          flatAmountEtb: fare.flat,
+          tiers: fare.tiers
+            ? {
+                create: fare.tiers.map((t) => ({
+                  label: t.label,
+                  fromKm: t.fromKm,
+                  toKm: t.toKm,
+                  amountEtb: t.amount,
+                })),
+              }
+            : undefined,
+        },
+      });
+    }
+  } else {
+    console.log("Skipping default-fare seed (existing fares preserved).");
   }
 
   const counts = {

@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  check:
+    name: Typecheck · Lint · Unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      # Prisma client is generated into src/generated — needed for typecheck & tests.
+      - run: npx prisma generate
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npx eslint
+      - name: Unit tests
+        run: npm test
+
+  feed-validator:
+    name: GTFS feed validator gate
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: gtfs_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gtfs_test
+      BETTER_AUTH_SECRET: ci-test-secret-not-for-production
+      RUN_DB_TESTS: "1"
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - name: Write .env for the seed
+        run: printf 'DATABASE_URL=%s\nBETTER_AUTH_SECRET=%s\n' "$DATABASE_URL" "$BETTER_AUTH_SECRET" > .env
+      - name: Seed the database
+        run: npm run db:seed
+      # Runs the CRITICAL preserve-fares regression (RUN_DB_TESTS=1) plus units.
+      - name: DB integration tests
+        run: npm test
+      - name: Generate fares-overlay feed
+        run: npx tsx scripts/generate-feed.ts
+      - name: Download MobilityData GTFS validator
+        working-directory: ${{ github.workspace }}
+        run: |
+          API=https://api.github.com/repos/MobilityData/gtfs-validator/releases/latest
+          URL=$(curl -sL "$API" | grep -o '"browser_download_url": *"[^"]*\.jar"' | grep -i cli | head -1 | cut -d'"' -f4)
+          [ -z "$URL" ] && URL=$(curl -sL "$API" | grep -o '"browser_download_url": *"[^"]*\.jar"' | head -1 | cut -d'"' -f4)
+          echo "Validator jar: $URL"
+          curl -L -o gtfs-validator.jar "$URL"
+      - name: Validate base feed (baseline)
+        working-directory: ${{ github.workspace }}
+        run: |
+          (cd data/gtfs-2026/combined && zip -qr "$GITHUB_WORKSPACE/base.zip" .)
+          java -jar gtfs-validator.jar -i base.zip -o base-out
+      - name: Validate overlay feed (candidate)
+        working-directory: ${{ github.workspace }}
+        run: |
+          OVERLAY=$(ls -t .gtfs-exports/dandii-gtfs-v*.zip | head -1)
+          echo "Overlay feed: $OVERLAY"
+          java -jar gtfs-validator.jar -i "$OVERLAY" -o overlay-out
+      # Gate: the overlay must not introduce errors the base feed did not have.
+      - name: GTFS validator gate
+        run: node scripts/validate-feed-diff.mjs "$GITHUB_WORKSPACE/base-out/report.json" "$GITHUB_WORKSPACE/overlay-out/report.json"

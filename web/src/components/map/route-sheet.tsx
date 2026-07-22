@@ -1,22 +1,71 @@
 "use client";
 
-import { X as CloseX } from "@untitledui/icons";
+import {
+  Bookmark,
+  BookmarkCheck,
+  CheckCircle,
+  X as CloseX,
+  Edit04,
+  Share06,
+} from "@untitledui/icons";
 import { RouteChip } from "@/components/console/route-chip";
-import { CLOSURE_REASON_LABELS, type ClosureReasonValue } from "@/lib/operators";
+import {
+  Tooltip,
+  TooltipTrigger,
+} from "@/components/base/tooltip/tooltip";
+import {
+  CLOSURE_REASON_LABELS,
+  type ClosureReasonValue,
+} from "@/lib/operators";
+import { cx } from "@/utils/cx";
+import { FareProposalForm } from "./fare-proposal-form";
 import type { RouteDetail } from "./types";
+import { useMemo, useState } from "react";
 
 function formatHeadway(secs: number) {
   const minutes = Math.round(secs / 60);
   return `every ${minutes} min`;
 }
 
+const actionBtn = (active: boolean) =>
+  cx(
+    "cursor-pointer rounded-lg p-1 hover:bg-[#F4F5F2]",
+    active ? "text-[#1A73E8]" : "text-[#9AA69C] hover:text-[#3D4A3F]",
+  );
+
 export function RouteSheet({
   detail,
   onClose,
-}: {
+  signedIn = false,
+  isSaved = false,
+  onToggleSave,
+  selectedRoute,
+}: Readonly<{
   detail: RouteDetail;
   onClose: () => void;
-}) {
+  signedIn?: boolean;
+  isSaved?: boolean;
+  onToggleSave?: () => void;
+  selectedRoute: { id: string; shortName: string } | null;
+}>) {
+  const [copied, setCopied] = useState(false);
+  const [editingFare, setEditingFare] = useState(false);
+
+  const shareUrl = useMemo(
+    () =>
+      selectedRoute && typeof window !== "undefined"
+        ? `${window.location.origin}/?route=${selectedRoute.id}`
+        : null,
+    [selectedRoute],
+  );
+
+  const copyShare = async () => {
+    if (!shareUrl) return;
+    await navigator.clipboard.writeText(shareUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  };
+
   return (
     <div className="pointer-events-auto flex min-h-0 w-full flex-col overflow-hidden rounded-2xl bg-[#F8F9FA]">
       <div className="flex items-start gap-2.5 border-b border-[#EEF1EA] p-4">
@@ -79,6 +128,83 @@ export function RouteSheet({
                 : "—"}
             </div>
           </div>
+        </div>
+
+        <div className="flex w-full flex-col gap-2.5">
+          {signedIn && (
+            <div className="flex items-center justify-center gap-5">
+              {onToggleSave && (
+                <Tooltip
+                  title={isSaved ? "Unsave route" : "Save route"}
+                  placement="top"
+                  delay={200}
+                >
+                  <TooltipTrigger
+                    onPress={onToggleSave}
+                    aria-label={isSaved ? "Unsave route" : "Save route"}
+                    aria-pressed={isSaved}
+                    className={actionBtn(isSaved)}
+                  >
+                    {isSaved ? (
+                      <BookmarkCheck className="size-8" />
+                    ) : (
+                      <Bookmark className="size-8" />
+                    )}
+                  </TooltipTrigger>
+                </Tooltip>
+              )}
+              {selectedRoute && (
+                <Tooltip
+                  title={copied ? "Link copied" : "Copy share link"}
+                  placement="top"
+                  delay={200}
+                >
+                  <TooltipTrigger
+                    onPress={copyShare}
+                    aria-label={copied ? "Link copied" : "Copy share link"}
+                    className={actionBtn(copied)}
+                  >
+                    {copied ? (
+                      <CheckCircle className="size-8" />
+                    ) : (
+                      <Share06 className="size-8" />
+                    )}
+                  </TooltipTrigger>
+                </Tooltip>
+              )}
+              <Tooltip
+                title={
+                  editingFare
+                    ? "Close fare correction"
+                    : "Suggest fare correction"
+                }
+                placement="top"
+                delay={200}
+              >
+                <TooltipTrigger
+                  onPress={() => setEditingFare((v) => !v)}
+                  aria-label={
+                    editingFare
+                      ? "Close fare correction"
+                      : "Suggest fare correction"
+                  }
+                  aria-pressed={editingFare}
+                  className={actionBtn(editingFare)}
+                >
+                  <Edit04 className="size-8" />
+                </TooltipTrigger>
+              </Tooltip>
+            </div>
+          )}
+
+          <FareProposalForm
+            routeId={detail.id}
+            shortName={detail.shortName}
+            fare={detail.fare}
+            signedIn={signedIn}
+            open={editingFare}
+            onOpenChange={setEditingFare}
+          />
         </div>
 
         {detail.fare?.kind === "TIERED" && detail.fare.tiers.length > 0 && (

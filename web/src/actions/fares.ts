@@ -2,40 +2,29 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { applyFareChange, type FareData } from "@/lib/fare-write";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/session";
 import { fareSchema, tierSchema, type FareInput } from "./fare-schema";
 
+function toFareData(
+  input: Extract<FareInput, { kind: FareInput["kind"] }>,
+): FareData {
+  return input.kind === "FLAT"
+    ? { kind: "FLAT", flatAmountEtb: input.flatAmountEtb }
+    : { kind: "TIERED", tiers: input.tiers };
+}
+
 export async function updateFare(input: FareInput) {
-  await requirePermission({ fare: ["update"] });
+  const session = await requirePermission({ fare: ["update"] });
   const data = fareSchema.parse(input);
 
-  await prisma.$transaction(async (tx) => {
-    const fare = await tx.fare.upsert({
-      where: { routeId: data.routeId },
-      create: {
-        routeId: data.routeId,
-        kind: data.kind,
-        flatAmountEtb: data.kind === "FLAT" ? data.flatAmountEtb : null,
-      },
-      update: {
-        kind: data.kind,
-        flatAmountEtb: data.kind === "FLAT" ? data.flatAmountEtb : null,
-      },
-    });
-    await tx.fareTier.deleteMany({ where: { fareId: fare.id } });
-    if (data.kind === "TIERED") {
-      await tx.fareTier.createMany({
-        data: data.tiers.map((t) => ({
-          fareId: fare.id,
-          label: t.label,
-          fromKm: t.fromKm,
-          toKm: t.toKm,
-          amountEtb: t.amountEtb,
-        })),
-      });
-    }
-  });
+  await prisma.$transaction((tx) =>
+    applyFareChange(tx, data.routeId, toFareData(data), {
+      source: "CONSOLE_EDIT",
+      changedById: session.user.id,
+    }),
+  );
 
   revalidatePath("/console");
   revalidatePath("/console/fares");
@@ -57,35 +46,19 @@ const bulkFareSchema = z.discriminatedUnion("kind", [
 
 /** Applies one fare structure to every selected route. */
 export async function bulkSetFare(input: z.infer<typeof bulkFareSchema>) {
-  await requirePermission({ fare: ["update"] });
+  const session = await requirePermission({ fare: ["update"] });
   const data = bulkFareSchema.parse(input);
+  const fareData: FareData =
+    data.kind === "FLAT"
+      ? { kind: "FLAT", flatAmountEtb: data.flatAmountEtb }
+      : { kind: "TIERED", tiers: data.tiers };
 
   await prisma.$transaction(async (tx) => {
     for (const routeId of data.routeIds) {
-      const fare = await tx.fare.upsert({
-        where: { routeId },
-        create: {
-          routeId,
-          kind: data.kind,
-          flatAmountEtb: data.kind === "FLAT" ? data.flatAmountEtb : null,
-        },
-        update: {
-          kind: data.kind,
-          flatAmountEtb: data.kind === "FLAT" ? data.flatAmountEtb : null,
-        },
+      await applyFareChange(tx, routeId, fareData, {
+        source: "CONSOLE_EDIT",
+        changedById: session.user.id,
       });
-      await tx.fareTier.deleteMany({ where: { fareId: fare.id } });
-      if (data.kind === "TIERED") {
-        await tx.fareTier.createMany({
-          data: data.tiers.map((t) => ({
-            fareId: fare.id,
-            label: t.label,
-            fromKm: t.fromKm,
-            toKm: t.toKm,
-            amountEtb: t.amountEtb,
-          })),
-        });
-      }
     }
   });
 

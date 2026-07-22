@@ -1,10 +1,18 @@
-import type { Metadata } from "next";
-import { IBM_Plex_Mono, Inter } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { IBM_Plex_Mono, Inter, Poppins } from "next/font/google";
+import { JsonLd } from "@/components/seo/json-ld";
+import { SITE, siteUrl } from "@/lib/site";
 import "@/styles/globals.css";
 
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
+});
+
+const poppins = Poppins({
+  variable: "--font-poppins",
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
 });
 
 const plexMono = IBM_Plex_Mono({
@@ -13,10 +21,89 @@ const plexMono = IBM_Plex_Mono({
   subsets: ["latin"],
 });
 
+const url = siteUrl();
+
 export const metadata: Metadata = {
-  title: "Dandii — Addis Ababa Transit",
-  description:
-    "Public transport route management and journey planning for Addis Ababa",
+  metadataBase: new URL(url),
+  title: {
+    default: `${SITE.name} — ${SITE.tagline}`,
+    template: `%s · ${SITE.name}`,
+  },
+  description: SITE.description,
+  applicationName: SITE.name,
+  keywords: [...SITE.keywords],
+  authors: [{ name: "Dandii", url: "https://dandii.app" }],
+  creator: "Dandii",
+  publisher: "Dandii",
+  category: "travel",
+  classification: "Public transit map and journey planner",
+  referrer: "origin-when-cross-origin",
+  formatDetection: {
+    telephone: false,
+    email: false,
+    address: false,
+  },
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    locale: SITE.locale,
+    url,
+    siteName: SITE.name,
+    title: `${SITE.name} — ${SITE.tagline}`,
+    description: SITE.description,
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: "Dandii — Addis Ababa Transit Map",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${SITE.name} — ${SITE.tagline}`,
+    description: SITE.shortDescription,
+    images: ["/opengraph-image"],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
+  },
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "48x48" },
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/logo.svg", type: "image/svg+xml" },
+    ],
+    apple: [{ url: "/apple-icon", type: "image/png" }],
+  },
+  manifest: "/manifest.webmanifest",
+  other: {
+    "geo.region": "ET-AA",
+    "geo.placename": "Addis Ababa",
+    "geo.position": "9.03;38.74",
+    ICBM: "9.03, 38.74",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#15803D" },
+    { media: "(prefers-color-scheme: dark)", color: "#14532D" },
+  ],
+  colorScheme: "light",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({
@@ -27,9 +114,16 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${inter.variable} ${plexMono.variable} h-full antialiased`}
+      className={`${inter.variable} ${poppins.variable} ${plexMono.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col">{children}</body>
+      <head>
+        <link rel="llms" href="/llms.txt" />
+        <link rel="alternate" type="text/plain" href="/llms.txt" title="llms.txt" />
+      </head>
+      <body className="flex min-h-full flex-col">
+        <JsonLd />
+        {children}
+      </body>
     </html>
   );
 }

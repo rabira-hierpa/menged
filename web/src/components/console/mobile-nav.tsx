@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BankNote02,
+  CheckDone01,
   DotsVertical,
   Grid01,
   LineChartUp01,
@@ -19,12 +20,14 @@ export const MOBILE_TABS = [
   { href: "/console/routes", label: "Routes", icon: RouteIcon },
   { href: "/console/network", label: "Network", icon: Map01 },
   { href: "/console/fares", label: "Fares", icon: BankNote02 },
+  { href: "/console/proposals", label: "Review", icon: CheckDone01 },
   { href: "/console/analytics", label: "Analytics", icon: LineChartUp01 },
 ];
 
 interface ConsoleMobileNavProps {
   user: { name: string; email: string; role: string };
   canManageSettings: boolean;
+  pendingProposals: number;
 }
 
 /**
@@ -35,6 +38,7 @@ interface ConsoleMobileNavProps {
 export function ConsoleMobileNav({
   user,
   canManageSettings,
+  pendingProposals,
 }: ConsoleMobileNavProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -87,6 +91,13 @@ export function ConsoleMobileNav({
                 </div>
               </div>
               <Link
+                href="/console/feeds"
+                className="px-3.5 py-2.5 text-[13px] font-medium hover:bg-[#F4F5F2]"
+                onClick={() => setMenuOpen(false)}
+              >
+                Feed Versions
+              </Link>
+              <Link
                 href="/"
                 className="px-3.5 py-2.5 text-[13px] font-medium hover:bg-[#F4F5F2]"
                 onClick={() => setMenuOpen(false)}
@@ -126,11 +137,18 @@ export function ConsoleMobileNav({
               key={tab.href}
               href={tab.href}
               className={cx(
-                "flex flex-1 flex-col items-center gap-1 py-2.5 text-[10.5px] font-semibold",
+                "relative flex flex-1 flex-col items-center gap-1 py-2.5 text-[10.5px] font-semibold",
                 active ? "text-[#9DD5AB]" : "text-[#7E9182]",
               )}
             >
-              <Icon className="size-5.5" />
+              <span className="relative">
+                <Icon className="size-5.5" />
+                {tab.href === "/console/proposals" && pendingProposals > 0 && (
+                  <span className="absolute -top-1.5 -right-2 flex min-w-4 items-center justify-center rounded-full bg-[#DC2626] px-1 text-[9.5px] font-bold text-white ring-2 ring-[#152018]">
+                    {pendingProposals}
+                  </span>
+                )}
+              </span>
               {tab.label}
             </Link>
           );

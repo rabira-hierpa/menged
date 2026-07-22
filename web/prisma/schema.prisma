@@ -26,6 +26,10 @@ model User {
   banExpires    DateTime?
   sessions      Session[]
   accounts      Account[]
+  // Last time the user opened their My Submissions list. The account-drawer
+  // avatar shows an unseen-count badge for proposals decided after this
+  // (design-review D2). Null = never viewed.
+  lastSubmissionsViewedAt DateTime?
 
   @@unique([email])
   @@map("user")
@@ -139,10 +143,13 @@ model Route {
   geojsonSimplified Json?
   lengthMeters      Float?
 
-  trips      Trip[]
-  fare       Fare?
-  closures   RouteClosure[]
-  assignment RouteAssignment?
+  trips         Trip[]
+  fare          Fare?
+  closures      RouteClosure[]
+  assignment    RouteAssignment?
+  proposals     FareProposal[]
+  savedBy       SavedRoute[]
+  fareChangeLog FareChangeLog[]
 
   @@index([shortName])
   @@map("route")
@@ -267,4 +274,115 @@ model RouteAssignment {
 
   @@index([operatorId])
   @@map("route_assignment")
+}
+
+// ---------------------------------------------------------------------------
+// Crowdsourced fare registry (design doc: rz-dev-design-20260721)
+// ---------------------------------------------------------------------------
+
+enum ProposalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  // Set on the other pending proposals for a route when one is approved, so
+  // every reporter's My Submissions resolves and the queue converges (5A).
+  SUPERSEDED
+}
+
+enum FareChangeSource {
+  PROPOSAL_APPROVAL
+  CONSOLE_EDIT
+  RESEED
+}
+
+// A rider-submitted fare correction for a route. Whole-fare replacement,
+// matching updateFare semantics. User ids are plain strings (no FK), like
+// RouteClosure.createdById, so the audit trail survives user deletion (1A).
+model FareProposal {
+  id            String         @id @default(cuid())
+  routeId       String
+  route         Route          @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  submittedById String
+  status        ProposalStatus @default(PENDING)
+  note          String?
+
+  // Proposed fare (whole-fare replacement).
+  proposedKind    FareKind
+  proposedFlatEtb Decimal? @db.Decimal(8, 2)
+  proposedTiers   Json? // [{label, fromKm, toKm, amountEtb}] when TIERED
+
+  // Snapshot of the fare at submission time, for stable diffs. Nullable: a
+  // route may have no Fare row yet ("no fare on record").
+  baselineKind    FareKind?
+  baselineFlatEtb Decimal? @db.Decimal(8, 2)
+  baselineTiers   Json?
+
+  reviewedById String?
+  reviewNote   String?
+  decidedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([routeId, status])
+  @@index([submittedById, createdAt])
+  @@map("fare_proposal")
+}
+
+model SavedRoute {
+  userId    String
+  routeId   String
+  route     Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, routeId])
+  @@index([userId])
+  @@map("saved_route")
+}
+
+// Append-only audit trail: one row per fare write from any source.
+model FareChangeLog {
+  id          String           @id @default(cuid())
+  routeId     String
+  route       Route            @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  proposalId  String?
+  changedById String
+  source      FareChangeSource
+
+  beforeKind    FareKind?
+  beforeFlatEtb Decimal?  @db.Decimal(8, 2)
+  beforeTiers   Json?
+  afterKind     FareKind?
+  afterFlatEtb  Decimal?  @db.Decimal(8, 2)
+  afterTiers    Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([routeId, createdAt])
+  @@map("fare_change_log")
+}
+
+enum ValidatorStatus {
+  PENDING
+  PASS
+  WARN
+  FAIL
+}
+
+// A generated, versioned GTFS export (fares overlay on the base feed).
+model FeedVersion {
+  id              String          @id @default(cuid())
+  version         Int             @unique
+  label           String
+  filePath        String
+  sizeBytes       Int
+  fareChangeCount Int             @default(0)
+  generatedById   String
+  validatorStatus ValidatorStatus @default(PENDING)
+  validatorReport Json?
+  // Cursor: the newest FareChangeLog id included in this version. The next
+  // version's change report lists entries created after this (no time races).
+  lastChangeLogId String?
+  createdAt       DateTime        @default(now())
+
+  @@map("feed_version")
 }

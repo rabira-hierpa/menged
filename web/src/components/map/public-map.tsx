@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import MapGl, {
   Layer,
   Source,
@@ -11,19 +12,33 @@ import MapGl, {
 import type { FilterSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { SearchLg } from "@untitledui/icons";
+import { toggleSavedRoute } from "@/actions/saved-routes";
 import { RouteChip } from "@/components/console/route-chip";
+import type { AccountData } from "@/lib/account";
 import {
   CLOSED_ROUTE_COLOR,
   OPERATOR_CODES,
   OPERATOR_META,
 } from "@/lib/operators";
+import {
+  recordSearch,
+  useRecentSearches,
+} from "@/lib/recent-searches";
 import { useMapStore } from "@/stores/map-store";
 import { cx } from "@/utils/cx";
+import { AccountMenu } from "./account-menu";
 import { BottomSheet } from "./bottom-sheet";
 import { DirectionsPanel, type DirectionsEndpoint } from "./directions-panel";
 import { FloatingControls } from "./floating-controls";
 import { LayersPanel } from "./layers-panel";
+import {
+  LibraryIconRail,
+  LibraryMenuButton,
+  LibraryPanel,
+  type LibrarySection,
+} from "./library-rail";
 import { BlueDotMarker } from "./markers";
+import { DandiiLogo } from "@/components/foundations/logo/dandii-logo";
 import {
   ADDIS_CENTER,
   applyRouteHoverTransitions,
@@ -65,12 +80,15 @@ function boundsOf(coordinates: [number, number][]) {
   ] as [[number, number], [number, number]];
 }
 
+/** Desktop left-panel footprint used by fitBounds. */
+type PanelLayout = "collapsed" | "one" | "two";
+
 /**
  * Padding that keeps geometry clear of the sheet (mobile) or panel
- * (desktop). `withSidePanel` accounts for the detail panel that opens
- * beside the main panel when a route/stop is selected.
+ * (desktop). Layout tracks collapsed (~40) / one-col (~440) / two-col (~840),
+ * plus ~48px when the hamburger library rail is open.
  */
-function fitPadding(withSidePanel = false) {
+function fitPadding(layout: PanelLayout = "one", libraryRail = false) {
   const mobile =
     typeof window !== "undefined" &&
     window.matchMedia("(max-width: 639px)").matches;
@@ -82,7 +100,10 @@ function fitPadding(withSidePanel = false) {
       right: 40,
     };
   }
-  return { top: 80, bottom: 80, left: withSidePanel ? 840 : 440, right: 80 };
+  const rail = libraryRail ? 48 : 0;
+  const left =
+    layout === "collapsed" ? 40 : layout === "two" ? 840 + rail : 440 + rail;
+  return { top: 80, bottom: 80, left, right: 80 };
 }
 
 const routeHoverCache = new Map<string, RouteHoverPreview>();
@@ -117,13 +138,46 @@ function StopCard({
 }
 
 interface PublicMapProps {
-  user: { name: string; hasConsoleAccess: boolean } | null;
+  user: { name: string; email: string; hasConsoleAccess: boolean } | null;
+  account: AccountData | null;
 }
 
-export function PublicMap({ user }: PublicMapProps) {
+export function PublicMap({ user, account }: PublicMapProps) {
+  const router = useRouter();
   const mapRef = useRef<MapRef>(null);
   const { selectedRouteId, setSelectedRouteId, hiddenOperators, setSheetSnap } =
     useMapStore();
+
+  // Optimistic saved-route ids (server data + local toggles). Re-sync from the
+  // server prop across router.refresh() cycles via render-time comparison.
+  const [savedRouteIds, setSavedRouteIds] = useState<Set<string>>(
+    () => new Set(account?.savedRoutes.map((r) => r.routeId) ?? []),
+  );
+  const [prevAccount, setPrevAccount] = useState(account);
+  if (account !== prevAccount) {
+    setPrevAccount(account);
+    setSavedRouteIds(new Set(account?.savedRoutes.map((r) => r.routeId) ?? []));
+  }
+
+  // Recent searches (localStorage) shown in the sidebar — reactive via an
+  // external store, so recordSearch/clear below update it with no effect.
+  const recents = useRecentSearches();
+
+  // Desktop sidebar collapse (Google-Maps chevron). Desktop-only; the mobile
+  // bottom sheet has its own snap points.
+  const [collapsed, setCollapsed] = useState(false);
+
+  // Hamburger library rail: Saved / Recent / Fare submissions.
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [librarySection, setLibrarySection] = useState<LibrarySection | null>(
+    null,
+  );
+
+  // How the current detail was opened — drives State B (two-col) vs State C
+  // (detail stacked under search in the left panel, like Maps POI).
+  const [detailSource, setDetailSource] = useState<"search" | "direct" | null>(
+    null,
+  );
 
   const [geojson, setGeojson] = useState<GeoJSON.FeatureCollection | null>(
     null,
@@ -184,7 +238,9 @@ export function PublicMap({ user }: PublicMapProps) {
     : null;
   const visibleHoveredRouteId =
     hoveredRouteId &&
-    !hiddenOperators.includes(hoveredOperator as (typeof hiddenOperators)[number])
+    !hiddenOperators.includes(
+      hoveredOperator as (typeof hiddenOperators)[number],
+    )
       ? hoveredRouteId
       : null;
 
@@ -206,6 +262,27 @@ export function PublicMap({ user }: PublicMapProps) {
       ? routeDetail.detail
       : null;
   const hasDirections = directionsResults !== null && tab === "directions";
+
+  // State B = search-driven two-column; State C = direct open, one column
+  // with detail under the search bar (no empty results panel).
+  const twoColumnDetail = detailSource === "search";
+  const panelLayout: PanelLayout = collapsed
+    ? "collapsed"
+    : twoColumnDetail
+      ? "two"
+      : "one";
+  const panelLayoutRef = useRef<PanelLayout>(panelLayout);
+  const detailSourceRef = useRef(detailSource);
+  const libraryOpenRef = useRef(libraryOpen);
+  useEffect(() => {
+    panelLayoutRef.current = panelLayout;
+  }, [panelLayout]);
+  useEffect(() => {
+    detailSourceRef.current = detailSource;
+  }, [detailSource]);
+  useEffect(() => {
+    libraryOpenRef.current = libraryOpen;
+  }, [libraryOpen]);
 
   useEffect(() => {
     fetch("/api/geo/routes")
@@ -263,15 +340,17 @@ export function PublicMap({ user }: PublicMapProps) {
     else map.once("idle", apply);
   }, [hoveredRouteId, hoverPreview]);
 
-  // Search-as-you-type.
+  // Search-as-you-type. Skip while a direct (map/saved/deeplink) detail is
+  // open — the query box holds the origin stop name as a label, not a search.
   useEffect(() => {
+    if (detailSource === "direct") return;
     if (query.trim().length < 2) return;
     const handle = setTimeout(async () => {
       const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
       setSearchResults(await res.json());
     }, 250);
     return () => clearTimeout(handle);
-  }, [query]);
+  }, [query, detailSource]);
 
   // Load route detail when a route is selected.
   useEffect(() => {
@@ -282,11 +361,15 @@ export function PublicMap({ user }: PublicMapProps) {
       .then((data: RouteDetail) => {
         if (cancelled) return;
         setRouteDetail({ routeId: selectedRouteId, detail: data });
+        // State C: label the search box with the origin stop (Maps POI pattern).
+        if (detailSourceRef.current === "direct") {
+          const origin = data.stops[0]?.name;
+          if (origin) setQuery(origin);
+        }
         if (data.geojson?.coordinates?.length) {
           mapRef.current?.fitBounds(
             boundsOf(data.geojson.coordinates as [number, number][]),
-            // Selecting a route opens the detail side panel on desktop.
-            { padding: fitPadding(true), duration: 800 },
+            { padding: fitPadding(panelLayoutRef.current, libraryOpenRef.current), duration: 800 },
           );
         }
       });
@@ -305,24 +388,50 @@ export function PublicMap({ user }: PublicMapProps) {
     );
     if (coords.length > 0) {
       mapRef.current?.fitBounds(boundsOf(coords), {
-        padding: fitPadding(),
+        padding: fitPadding(panelLayout, libraryOpen),
         duration: 700,
       });
     }
-  }, [directionsResults, activeMode]);
+  }, [directionsResults, activeMode, panelLayout, libraryOpen]);
 
-  const selectRoute = (routeId: string) => {
+  const selectRoute = (
+    routeId: string,
+    opts: { fromSearch?: boolean } = {},
+  ) => {
+    const fromSearch = Boolean(opts.fromSearch);
+    if (fromSearch && query.trim().length >= 2) recordSearch(query);
+    const source = fromSearch ? "search" : "direct";
+    detailSourceRef.current = source;
     setSelectedStop(null);
     setHoveredRouteId(null);
     setSelectedRouteId(routeId);
+    setDetailSource(source);
+    setCollapsed(false);
     setSheetSnap("half");
+    // Prefer an immediate label from the hover cache so the search box
+    // fills before /api/routes returns.
+    if (!fromSearch) {
+      const preview = routeHoverCache.get(routeId);
+      const origin = preview?.stops[0]?.name;
+      if (origin) setQuery(origin);
+    }
   };
 
-  const selectStop = (stop: StopSearchResult) => {
+  const selectStop = (
+    stop: StopSearchResult,
+    opts: { fromSearch?: boolean } = {},
+  ) => {
+    const fromSearch = Boolean(opts.fromSearch);
+    if (fromSearch && query.trim().length >= 2) recordSearch(query);
+    const source = fromSearch ? "search" : "direct";
+    detailSourceRef.current = source;
     setSelectedRouteId(null);
     setSelectedStop(stop);
+    setDetailSource(source);
+    setCollapsed(false);
     setStopBounceKey((k) => k + 1);
     setSheetSnap("half");
+    if (!fromSearch) setQuery(stop.name);
     mapRef.current?.flyTo({
       center: [stop.lon, stop.lat],
       zoom: 15,
@@ -330,10 +439,51 @@ export function PublicMap({ user }: PublicMapProps) {
     });
   };
 
+  // Save/unsave the selected route (optimistic; server confirms via refresh).
+  const onToggleSave = (routeId: string) => {
+    setSavedRouteIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(routeId)) next.delete(routeId);
+      else next.add(routeId);
+      return next;
+    });
+    void toggleSavedRoute({ routeId }).then((res) => {
+      if (!res.ok) {
+        // Roll back on failure.
+        setSavedRouteIds(
+          new Set(account?.savedRoutes.map((r) => r.routeId) ?? []),
+        );
+      } else {
+        router.refresh();
+      }
+    });
+  };
+
+  // Share deep-link: open the route named by ?route=<id> on first load.
+  const deepLinkedRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkedRef.current) return;
+    if (typeof window === "undefined") return;
+    const routeId = new URLSearchParams(window.location.search).get("route");
+    if (!routeId) return;
+    deepLinkedRef.current = true;
+    // Defer so this isn't a sync setState-in-effect cascade.
+    queueMicrotask(() => {
+      detailSourceRef.current = "direct";
+      setSelectedRouteId(routeId);
+      setDetailSource("direct");
+      setSheetSnap("half");
+    });
+  }, [setSelectedRouteId, setSheetSnap]);
+
   /** Back navigation from a route/stop detail to the results (or map). */
   const clearSelection = () => {
+    const wasDirect = detailSource === "direct";
+    detailSourceRef.current = null;
     setSelectedRouteId(null);
     setSelectedStop(null);
+    setDetailSource(null);
+    if (wasDirect) setQuery("");
   };
 
   const onMapClick = (event: MapLayerMouseEvent) => {
@@ -369,7 +519,13 @@ export function PublicMap({ user }: PublicMapProps) {
       if (routeId && routeId !== hoveredRouteId) previewRoute(routeId);
       else if (!routeId && hoveredRouteId) previewRoute(null);
     },
-    [hoveredRouteId, hasDirections, hiddenOperators, previewRoute, selectedRouteId],
+    [
+      hoveredRouteId,
+      hasDirections,
+      hiddenOperators,
+      previewRoute,
+      selectedRouteId,
+    ],
   );
 
   const onMapMouseLeave = useCallback(() => {
@@ -399,7 +555,9 @@ export function PublicMap({ user }: PublicMapProps) {
     [hiddenOperators],
   );
 
-  const overlayActive = Boolean(visibleHoveredRouteId || detail || hasDirections);
+  const overlayActive = Boolean(
+    visibleHoveredRouteId || detail || hasDirections,
+  );
 
   /** Fade lines of hidden operators instead of hard filtering. */
   const routeOpacity = useMemo(
@@ -418,7 +576,10 @@ export function PublicMap({ user }: PublicMapProps) {
   );
 
   const showHubStops =
-    tab === "explore" && !selectedRouteId && !hasDirections && !visibleHoveredRouteId;
+    tab === "explore" &&
+    !selectedRouteId &&
+    !hasDirections &&
+    !visibleHoveredRouteId;
   const showHoverStops = Boolean(
     visibleHoveredRouteId && hoverPreview?.stops.length && !selectedRouteId,
   );
@@ -475,6 +636,7 @@ export function PublicMap({ user }: PublicMapProps) {
   ];
 
   const hasSearchResults =
+    detailSource !== "direct" &&
     query.trim().length >= 2 &&
     (results.routes.length > 0 || results.stops.length > 0);
 
@@ -492,170 +654,251 @@ export function PublicMap({ user }: PublicMapProps) {
 
   /** Sheet/panel content (rendered in both the mobile sheet and desktop panel). */
   const sheetContent = (
-    <div className="flex flex-col gap-3">
-      {/* Header: brand + tabs */}
-      <div className="flex items-center gap-2">
-        <div className="min-w-0">
-          <div className="text-md font-semibold tracking-widest text-[#15803D]">
-            Dandii
-          </div>
-        </div>
-        <div className="ml-auto flex shrink-0 rounded-full bg-[#F1F3F4] p-0.5">
-          {(["explore", "directions"] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => {
-                setTab(t);
-                if (t === "explore") exitDirections();
-              }}
-              className={cx(
-                "cursor-pointer rounded-full px-3.5 py-1.5 text-[12px] font-semibold capitalize",
-                tab === t
-                  ? "bg-white text-[#1A73E8] shadow-sm"
-                  : "text-[#5F6368]",
-              )}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {tab === "explore" ? (
-        <div className="flex flex-col gap-2.5">
-          {/* Search (desktop panel; mobile uses the floating pill) */}
-          <div className="relative max-sm:hidden">
-            <SearchLg className="pointer-events-none absolute top-1/2 left-3.5 size-4.5 -translate-y-1/2 text-[#5F6368]" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search routes and stops"
-              className="w-full rounded-full bg-[#F1F3F4] py-2.5 pr-4 pl-10 text-[14px] text-[#202124] placeholder:text-[#5F6368] focus:bg-white focus:outline-2 focus:outline-[#1A73E8]"
-            />
-          </div>
-
-          {/* Results stay visible beside the detail panel on desktop
-              (Google-Maps style); on mobile the detail takes over the sheet. */}
-          {hasSearchResults && (
-            <div
-              className={cx(
-                "flex flex-col gap-0.5",
-                (detail || selectedStop) && "max-sm:hidden",
-              )}
-            >
-              {results.routes.length > 0 && (
-                <div className="mt-1 text-[10.5px] font-semibold tracking-wide text-[#5F6368] uppercase">
-                  Routes
-                </div>
-              )}
-              {results.routes.map((route) => (
-                <button
-                  key={route.id}
-                  onClick={() => selectRoute(route.id)}
-                  onMouseEnter={() => previewRoute(route.id)}
-                  onMouseLeave={() => previewRoute(null)}
-                  className={cx(
-                    "flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 text-left",
-                    route.id === selectedRouteId
-                      ? "bg-[#E8F0FE]"
-                      : "hover:bg-[#F8F9FA]",
-                  )}
-                >
-                  <RouteChip
-                    shortName={route.shortName}
-                    operatorCode={route.operatorCode}
-                    size="sm"
-                  />
-                  <span className="min-w-0 truncate text-[13px] text-[#202124]">
-                    {route.longName}
-                  </span>
-                </button>
-              ))}
-              {results.stops.length > 0 && (
-                <div className="mt-1 text-[10.5px] font-semibold tracking-wide text-[#5F6368] uppercase">
-                  Stops
-                </div>
-              )}
-              {results.stops.map((stop) => (
-                <button
-                  key={stop.id}
-                  onClick={() => selectStop(stop)}
-                  className={cx(
-                    "flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 text-left",
-                    stop.id === selectedStop?.id
-                      ? "bg-[#E8F0FE]"
-                      : "hover:bg-[#F8F9FA]",
-                  )}
-                >
-                  <span className="size-2.5 shrink-0 rounded-full border-[3px] border-[#1A73E8] bg-white" />
-                  <span className="min-w-0 truncate text-[13px] text-[#202124]">
-                    {stop.name}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {query.trim().length >= 2 && !hasSearchResults && (
-            <div className="py-2 text-center text-[13px] text-[#80868B]">
-              No routes or stops found.
-            </div>
-          )}
-
-          {/* Mobile: detail replaces the sheet content, with back nav.
-              Desktop shows details in the separate side panel instead. */}
-          {(selectedStop || detail) && (
-            <div className="flex flex-col gap-2 sm:hidden">
-              <button
-                onClick={clearSelection}
-                className="flex cursor-pointer items-center gap-1.5 self-start rounded-full px-2 py-1 text-[13px] font-semibold text-[#1A73E8] hover:bg-[#F1F3F4]"
-              >
-                ← {hasSearchResults ? "Back to results" : "Back to map"}
-              </button>
-              {selectedStop && !detail && (
-                <StopCard stop={selectedStop} onDirections={openDirectionsTo} />
-              )}
-              {detail && <RouteSheet detail={detail} onClose={clearSelection} />}
-            </div>
-          )}
-
-          {query.trim().length < 2 && !selectedStop && !detail && (
-            <div className="flex flex-wrap gap-x-3.5 gap-y-1.5 pt-0.5">
-              {Object.values(OPERATOR_META).map((meta) => (
-                <span
-                  key={meta.code}
-                  className={cx(
-                    "flex items-center gap-1.5 text-[11.5px] font-medium",
-                    hiddenOperators.includes(meta.code)
-                      ? "text-[#BDC1C6] line-through"
-                      : "text-[#5F6368]",
-                  )}
-                >
-                  <span
-                    className="h-1 w-4 rounded-sm"
-                    style={{ background: meta.color }}
-                  />
-                  {meta.short}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : (
-        <DirectionsPanel
-          from={dirFrom}
-          to={dirTo}
-          setFrom={setDirFrom}
-          setTo={setDirTo}
-          results={directionsResults}
-          activeMode={activeMode}
-          onActiveMode={setActiveMode}
-          onResults={setDirectionsResults}
-          onEndpoints={setEndpoints}
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+      {libraryOpen && (
+        <LibraryIconRail
+          section={librarySection}
+          onSelect={(section) =>
+            setLibrarySection((prev) => (prev === section ? null : section))
+          }
+          unseenCount={account?.unseenCount ?? 0}
+          signedIn={Boolean(user)}
         />
       )}
+
+      <div className="flex w-96 max-w-full min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
+        {/* Header: hamburger + brand + tabs */}
+        <div className="flex items-center gap-1.5">
+          <LibraryMenuButton
+            open={libraryOpen}
+            onToggle={() => {
+              setLibraryOpen((open) => {
+                if (open) {
+                  setLibrarySection(null);
+                } else {
+                  setLibrarySection(user ? "saved" : "recent");
+                }
+                return !open;
+              });
+            }}
+          />
+          <div className="min-w-0">
+            <DandiiLogo />
+          </div>
+          <div className="ml-auto flex shrink-0 rounded-full bg-[#F1F3F4] p-0.5">
+            {(["explore", "directions"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => {
+                  setTab(t);
+                  if (t === "explore") exitDirections();
+                }}
+                className={cx(
+                  "cursor-pointer rounded-full px-3.5 py-1.5 text-[12px] font-semibold capitalize",
+                  tab === t
+                    ? "bg-white text-[#1A73E8] shadow-sm"
+                    : "text-[#5F6368]",
+                )}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {tab === "explore" ? (
+          <div className="flex flex-col gap-2.5">
+            {/* Search (desktop panel; mobile uses the floating pill) */}
+            <div className="relative max-sm:hidden">
+              <SearchLg className="pointer-events-none absolute top-1/2 left-3.5 size-4.5 -translate-y-1/2 text-[#5F6368]" />
+              <input
+                value={query}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setQuery(next);
+                  // Typing while a direct POI is open → leave State C and search.
+                  if (detailSource === "direct") {
+                    setSelectedRouteId(null);
+                    setSelectedStop(null);
+                    setDetailSource(null);
+                  }
+                }}
+                placeholder="Search routes and stops"
+                className="w-full rounded-full bg-[#F1F3F4] py-2.5 pr-4 pl-10 text-[14px] text-[#202124] placeholder:text-[#5F6368] focus:bg-white focus:outline-2 focus:outline-[#1A73E8]"
+              />
+            </div>
+
+            {/* Library section body (Saved / Recent / Submissions) */}
+            {libraryOpen &&
+              librarySection &&
+              query.trim().length < 2 &&
+              !selectedStop &&
+              !detail && (
+                <LibraryPanel
+                  section={librarySection}
+                  account={account}
+                  recents={recents}
+                  onSelectRoute={(routeId) => selectRoute(routeId)}
+                  onSelectRecent={(q) => setQuery(q)}
+                  signedIn={Boolean(user)}
+                />
+              )}
+
+            {/* Results stay visible beside the detail panel on desktop
+                (Google-Maps style); on mobile the detail takes over the sheet. */}
+            {hasSearchResults && (
+              <div
+                className={cx(
+                  "flex flex-col gap-0.5",
+                  (detail || selectedStop) && "max-sm:hidden",
+                )}
+              >
+                {results.routes.length > 0 && (
+                  <div className="mt-1 text-[10.5px] font-semibold tracking-wide text-[#5F6368] uppercase">
+                    Routes
+                  </div>
+                )}
+                {results.routes.map((route) => (
+                  <button
+                    key={route.id}
+                    onClick={() => selectRoute(route.id, { fromSearch: true })}
+                    onMouseEnter={() => previewRoute(route.id)}
+                    onMouseLeave={() => previewRoute(null)}
+                    className={cx(
+                      "flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 text-left",
+                      route.id === selectedRouteId
+                        ? "bg-[#E8F0FE]"
+                        : "hover:bg-[#F8F9FA]",
+                    )}
+                  >
+                    <RouteChip
+                      shortName={route.shortName}
+                      operatorCode={route.operatorCode}
+                      size="sm"
+                    />
+                    <span className="min-w-0 truncate text-[13px] text-[#202124]">
+                      {route.longName}
+                    </span>
+                  </button>
+                ))}
+                {results.stops.length > 0 && (
+                  <div className="mt-1 text-[10.5px] font-semibold tracking-wide text-[#5F6368] uppercase">
+                    Stops
+                  </div>
+                )}
+                {results.stops.map((stop) => (
+                  <button
+                    key={stop.id}
+                    onClick={() => selectStop(stop, { fromSearch: true })}
+                    className={cx(
+                      "flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-2 text-left",
+                      stop.id === selectedStop?.id
+                        ? "bg-[#E8F0FE]"
+                        : "hover:bg-[#F8F9FA]",
+                    )}
+                  >
+                    <span className="size-2.5 shrink-0 rounded-full border-[3px] border-[#1A73E8] bg-white" />
+                    <span className="min-w-0 truncate text-[13px] text-[#202124]">
+                      {stop.name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {query.trim().length >= 2 &&
+              detailSource !== "direct" &&
+              !hasSearchResults && (
+                <div className="py-2 text-center text-[13px] text-[#80868B]">
+                  No routes or stops found.
+                </div>
+              )}
+
+            {/* Detail under search: always on mobile; on desktop only for
+                State C (direct open). State B uses the right-hand side panel. */}
+            {(selectedStop || detail) && (
+              <div
+                className={cx(
+                  "flex flex-col gap-2",
+                  twoColumnDetail && "sm:hidden",
+                )}
+              >
+                <button
+                  onClick={clearSelection}
+                  className="flex cursor-pointer items-center gap-1.5 self-start rounded-full px-2 py-1 text-[13px] font-semibold text-[#1A73E8] hover:bg-[#F1F3F4]"
+                >
+                  ← {detailSource === "search" ? "Back to results" : "Close"}
+                </button>
+                {selectedStop && !detail && (
+                  <StopCard
+                    stop={selectedStop}
+                    onDirections={openDirectionsTo}
+                  />
+                )}
+                {detail && (
+                  <RouteSheet
+                    detail={detail}
+                    onClose={clearSelection}
+                    signedIn={Boolean(user)}
+                    isSaved={savedRouteIds.has(detail.id)}
+                    onToggleSave={() => onToggleSave(detail.id)}
+                    selectedRoute={
+                      detail
+                        ? { id: detail.id, shortName: detail.shortName }
+                        : null
+                    }
+                  />
+                )}
+              </div>
+            )}
+
+            {/* Operator legend when browsing (no search / selection / library list). */}
+            {query.trim().length < 2 &&
+              !selectedStop &&
+              !detail &&
+              !(libraryOpen && librarySection) && (
+                <div className="flex flex-wrap gap-x-3.5 gap-y-1.5 pt-0.5">
+                  {Object.values(OPERATOR_META).map((meta) => (
+                    <span
+                      key={meta.code}
+                      className={cx(
+                        "flex items-center gap-1.5 text-[11.5px] font-medium",
+                        hiddenOperators.includes(meta.code)
+                          ? "text-[#BDC1C6] line-through"
+                          : "text-[#5F6368]",
+                      )}
+                    >
+                      <span
+                        className="h-1 w-4 rounded-sm"
+                        style={{ background: meta.color }}
+                      />
+                      {meta.short}
+                    </span>
+                  ))}
+                </div>
+              )}
+          </div>
+        ) : (
+          <DirectionsPanel
+            from={dirFrom}
+            to={dirTo}
+            setFrom={setDirFrom}
+            setTo={setDirTo}
+            results={directionsResults}
+            activeMode={activeMode}
+            onActiveMode={setActiveMode}
+            onResults={setDirectionsResults}
+            onEndpoints={setEndpoints}
+          />
+        )}
+      </div>
     </div>
   );
+
+  const accountMenu =
+    user && account ? (
+      <AccountMenu user={user} unseenCount={account.unseenCount} />
+    ) : null;
 
   return (
     <div className="fixed inset-0 h-dvh w-full overflow-hidden">
@@ -866,7 +1109,15 @@ export function PublicMap({ user }: PublicMapProps) {
           <SearchLg className="pointer-events-none absolute top-1/2 left-4 size-4.5 -translate-y-1/2 text-[#5F6368]" />
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              const next = e.target.value;
+              setQuery(next);
+              if (detailSource === "direct") {
+                setSelectedRouteId(null);
+                setSelectedStop(null);
+                setDetailSource(null);
+              }
+            }}
             onFocus={() => {
               setTab("explore");
               setSheetSnap("half");
@@ -875,21 +1126,7 @@ export function PublicMap({ user }: PublicMapProps) {
             className="h-12 w-full rounded-full bg-white pr-4 pl-11 text-[15px] text-[#202124] shadow-[0_1px_6px_rgba(0,0,0,0.25)] placeholder:text-[#5F6368] focus:outline-none"
           />
         </div>
-        {user ? (
-          user.hasConsoleAccess ? (
-            <Link
-              href="/console"
-              aria-label="Open console"
-              className="flex size-12 shrink-0 items-center justify-center rounded-full bg-[#152018] text-[13px] font-bold text-white shadow-[0_1px_6px_rgba(0,0,0,0.25)]"
-            >
-              {user.name.charAt(0).toUpperCase()}
-            </Link>
-          ) : (
-            <span className="flex size-12 shrink-0 items-center justify-center rounded-full bg-white text-[13px] font-bold text-[#1A73E8] shadow-[0_1px_6px_rgba(0,0,0,0.25)]">
-              {user.name.charAt(0).toUpperCase()}
-            </span>
-          )
-        ) : (
+        {accountMenu ?? (
           <Link
             href="/sign-in"
             aria-label="Sign in"
@@ -900,22 +1137,9 @@ export function PublicMap({ user }: PublicMapProps) {
         )}
       </div>
 
-      {/* Desktop: auth pill */}
+      {/* Desktop: account drawer (signed in) or sign-in pill */}
       <div className="absolute top-4 right-4 z-20 max-sm:hidden">
-        {user ? (
-          user.hasConsoleAccess ? (
-            <Link
-              href="/console"
-              className="rounded-full bg-[#152018] px-4 py-2 text-[13px] font-semibold text-white shadow-lg hover:bg-[#24352A]"
-            >
-              Open console
-            </Link>
-          ) : (
-            <span className="rounded-full bg-white px-4 py-2 text-[13px] font-medium text-[#3D4A3F] shadow-lg">
-              {user.name}
-            </span>
-          )
-        ) : (
+        {accountMenu ?? (
           <Link
             href="/sign-in"
             className="rounded-full bg-[#152018] px-4 py-2 text-[13px] font-semibold text-white shadow-lg hover:bg-[#24352A]"
@@ -925,17 +1149,22 @@ export function PublicMap({ user }: PublicMapProps) {
         )}
       </div>
 
-      {/* Desktop: detail side panel beside the main panel (Google-Maps
-          style) — the results list stays visible in the main panel. */}
-      {tab === "explore" && (detail || selectedStop) && (
-        <div className="absolute top-4 left-[26rem] z-30 hidden max-h-[calc(100dvh-6rem)] w-96 flex-col overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-black/5 sm:flex">
+      {/* Desktop: State B detail column beside the search/results panel.
+          State C keeps detail under search in the left panel instead. */}
+      {tab === "explore" && twoColumnDetail && (detail || selectedStop) && (
+        <div
+          className={cx(
+            "absolute top-4 z-30 hidden max-h-[calc(100dvh-6rem)] w-96 flex-col overflow-hidden rounded-2xl bg-white shadow-xl ring-1 ring-black/5 sm:flex",
+            libraryOpen ? "left-[29rem]" : "left-[26rem]",
+          )}
+        >
           <div className="flex items-center gap-1 border-b border-[#EEF1EA] px-3 py-2">
             <button
               onClick={clearSelection}
               aria-label="Back"
               className="flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-1 text-[13px] font-semibold text-[#1A73E8] hover:bg-[#F1F3F4]"
             >
-              ← {hasSearchResults ? "Back to results" : "Close"}
+              ← Back to results
             </button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -943,7 +1172,16 @@ export function PublicMap({ user }: PublicMapProps) {
               <StopCard stop={selectedStop} onDirections={openDirectionsTo} />
             )}
             {detail && (
-              <RouteSheet detail={detail} onClose={clearSelection} />
+              <RouteSheet
+                detail={detail}
+                onClose={clearSelection}
+                signedIn={Boolean(user)}
+                selectedRoute={
+                  detail ? { id: detail.id, shortName: detail.shortName } : null
+                }
+                isSaved={savedRouteIds.has(detail.id)}
+                onToggleSave={() => onToggleSave(detail.id)}
+              />
             )}
           </div>
         </div>
@@ -951,7 +1189,13 @@ export function PublicMap({ user }: PublicMapProps) {
 
       <FloatingControls onLocate={onLocate} />
       <LayersPanel />
-      <BottomSheet>{sheetContent}</BottomSheet>
+      <BottomSheet
+        desktopHidden={collapsed}
+        onCollapse={() => setCollapsed(true)}
+        onExpand={() => setCollapsed(false)}
+      >
+        {sheetContent}
+      </BottomSheet>
     </div>
   );
 }

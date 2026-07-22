@@ -10,15 +10,22 @@ const NAV_ITEMS = [
   { href: "/console/routes", label: "Route Assignment", dot: "#15803D" },
   { href: "/console/network", label: "Network Map", dot: "#0F766E" },
   { href: "/console/fares", label: "Fare Management", dot: "#1D4ED8" },
+  { href: "/console/proposals", label: "Fare Review", dot: "#DC2626" },
+  { href: "/console/feeds", label: "Feed Versions", dot: "#0891B2" },
   { href: "/console/analytics", label: "Analytics", dot: "#9333EA" },
 ];
 
 interface ConsoleSidebarProps {
   user: { name: string; email: string; role: string };
   canManageSettings: boolean;
+  pendingProposals: number;
 }
 
-export function ConsoleSidebar({ user, canManageSettings }: ConsoleSidebarProps) {
+export function ConsoleSidebar({
+  user,
+  canManageSettings,
+  pendingProposals,
+}: ConsoleSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -63,6 +70,11 @@ export function ConsoleSidebar({ user, canManageSettings }: ConsoleSidebarProps)
                 style={{ background: item.dot }}
               />
               {item.label}
+              {item.href === "/console/proposals" && pendingProposals > 0 && (
+                <span className="ml-auto flex min-w-5 items-center justify-center rounded-full bg-[#DC2626] px-1.5 py-0.5 text-[10.5px] font-bold text-white">
+                  {pendingProposals}
+                </span>
+              )}
             </Link>
           );
         })}
