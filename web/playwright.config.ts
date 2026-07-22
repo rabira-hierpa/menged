@@ -6,6 +6,8 @@ import { defineConfig, devices } from "@playwright/test";
  * seeded. Run the app + `npx playwright install chromium` first, then
  * `npm run test:e2e`.
  */
+const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -13,9 +15,18 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: "list",
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000",
+    baseURL,
     trace: "on-first-retry",
   },
+  // Reuse a local `next dev` when present; otherwise start one for the suite.
+  webServer: process.env.PLAYWRIGHT_BASE_URL
+    ? undefined
+    : {
+        command: "npm run dev",
+        url: baseURL,
+        reuseExistingServer: true,
+        timeout: 120_000,
+      },
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   ],
