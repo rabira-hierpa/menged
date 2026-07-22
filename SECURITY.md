@@ -11,7 +11,7 @@ branch (`dev`). Older tags are not patched unless noted in a release.
 
 Prefer one of:
 
-1. **GitHub Security Advisories** — [Report a vulnerability](https://github.com/rabira-hierpa/menged/security/advisories/new) on this repository (private to maintainers).
+1. **GitHub Security Advisories** — [Report a vulnerability](https://github.com/rabira-hierpa/dandii/security/advisories/new) on this repository (private to maintainers).
 2. **Email** — `rabira.hierpa@gmail.com` with subject `[Dandii security]`.
 
 Please include:
